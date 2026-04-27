@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>JioStar Revenue Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-mark">JS</div>
+      <div class="brand-text">
+        <span class="brand-name">JioStar</span>
+        <span class="brand-sub">Revenue Intelligence</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section-label">Filters</div>
+
+    <div class="filter-group">
+      <label class="filter-label">Month</label>
+      <select id="month-select" class="filter-select"><option>Loading...</option></select>
+    </div>
+
+    <div class="filter-group">
+      <label class="filter-label">Business Unit</label>
+      <select id="bu-select" class="filter-select">
+        <option value="all">All BUs</option>
+        <option value="LCS1">LCS1</option>
+        <option value="LCS2">LCS2</option>
+        <option value="MM1">MM1</option>
+        <option value="MM2">MM2</option>
+        <option value="Others">Others</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="filter-label">Platform</label>
+      <select id="platform-select" class="filter-select">
+        <option value="all">All Platforms</option>
+        <option value="CTV">CTV</option>
+        <option value="Mobile">Mobile</option>
+        <option value="Mobile+CTV">Mobile+CTV</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="filter-label">Ad Type</label>
+      <select id="adtype-select" class="filter-select">
+        <option value="all">All Types</option>
+        <option value="Video">Video</option>
+        <option value="Display">Display</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="filter-label">Ad Format</label>
+      <select id="format-select" class="filter-select">
+        <option value="all">All Formats</option>
+        <optgroup label="Video">
+          <option value="Preroll">Preroll</option>
+          <option value="Midroll">Midroll</option>
+          <option value="Integration">Integration</option>
+          <option value="Spots">Spots</option>
+        </optgroup>
+        <optgroup label="Display">
+          <option value="Billboard">Billboard</option>
+          <option value="Breakout Billboard">Breakout Billboard</option>
+          <option value="Pause Ads">Pause Ads</option>
+          <option value="Display and Frames">Display and Frames</option>
+          <option value="Fence Ads">Fence Ads</option>
+          <option value="Untagged">Untagged</option>
+        </optgroup>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="filter-label">Category</label>
+      <select id="category-select" class="filter-select">
+        <option value="all">All Categories</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="filter-label">Agency</label>
+      <select id="agency-select" class="filter-select">
+        <option value="all">All Agencies</option>
+      </select>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="sidebar-section-label">Quick Questions</div>
+    <div class="quick-questions">
+      <button class="quick-btn" onclick="setQuickQuery('Top 10 clients this month by delivered revenue')">Top 10 clients</button>
+      <button class="quick-btn" onclick="setQuickQuery('Which BU is performing best and why?')">Best performing BU</button>
+      <button class="quick-btn" onclick="setQuickQuery('Which categories declined vs last month?')">Category drops</button>
+      <button class="quick-btn" onclick="setQuickQuery('Which agencies are driving the most growth?')">Agency growth</button>
+      <button class="quick-btn" onclick="setQuickQuery('What are the seasonal opportunities for next month?')">Opportunities</button>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="data-freshness">
+        <span class="freshness-dot" id="freshness-dot"></span>
+        <span id="freshness-label">Loading data...</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 class="page-title" id="page-title">Loading...</h1>
+        <span class="page-sub" id="page-sub">Revenue Intelligence Platform</span>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-meta" id="topbar-meta">—</div>
+      </div>
+    </header>
+
+    <section class="kpi-row" id="kpi-row">
+      <div class="kpi-card skeleton"></div>
+      <div class="kpi-card skeleton"></div>
+      <div class="kpi-card skeleton"></div>
+      <div class="kpi-card skeleton"></div>
+    </section>
+
+    <section class="query-section">
+      <div class="query-box">
+        <div class="query-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </div>
+        <input type="text" id="query-input" class="query-input"
+          placeholder="Ask anything — e.g. Top 10 clients in LCS1 on Mobile for this month..."
+          autocomplete="off"/>
+        <button class="query-submit" id="query-submit" onclick="submitQuery()">
+          Ask Gemini
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+      <div class="query-answer-area" id="query-answer-area" style="display:none;">
+        <div class="answer-label">
+          <span class="answer-dot"></span>
+          Gemini's answer
+          <button class="answer-close" onclick="closeAnswer()">✕</button>
+        </div>
+        <div class="answer-content" id="answer-content"></div>
+      </div>
+    </section>
+
+    <div class="panels-grid">
+
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <span class="panel-title">BU Breakdown</span>
+          <span class="panel-tag">Delivered Revenue · Cr</span>
+        </div>
+        <div class="panel-body" id="bu-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Platform Split</span>
+          <span class="panel-tag">Del Rev · Cr</span>
+        </div>
+        <div class="panel-body" id="platform-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Ad Type</span>
+          <span class="panel-tag">Video vs Display</span>
+        </div>
+        <div class="panel-body" id="adtype-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+      </section>
+
+      <section class="panel panel-tall">
+        <div class="panel-header">
+          <span class="panel-title">Category Leaderboard</span>
+          <span class="panel-tag">Top 10 · Del Rev</span>
+        </div>
+        <div class="panel-body" id="category-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
+      </section>
+
+      <section class="panel panel-tall">
+        <div class="panel-header">
+          <span class="panel-title">Agency Performance</span>
+          <span class="panel-tag">Del Rev · Cr</span>
+        </div>
+        <div class="panel-body" id="agency-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
+      </section>
+
+      <section class="panel panel-full">
+        <div class="panel-header">
+          <span class="panel-title" id="clients-panel-title">Top Clients</span>
+          <span class="panel-tag">By Delivered Revenue</span>
+        </div>
+        <div class="panel-body" id="clients-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+      </section>
+
+    </div>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="scripts/ui.js"></script>
+</body>
+</html>
