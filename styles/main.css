@@ -594,3 +594,28 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); }
+/* ── Panel tables ──────────────────────────────── */
+.ptable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ptable th {
+  padding: 7px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.ptable td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--surface-2);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.ptable tr:last-child td { border-bottom: none; }
+.ptable tbody tr:hover td { background: var(--surface); }
