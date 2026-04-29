@@ -1462,13 +1462,84 @@ function toggleBrands(idx, btn) {
 }
 
 // ── Query ─────────────────────────────────────────
-function setQuickQuery(t) { document.getElementById('query-input').value=t; document.getElementById('query-input').focus(); }
-function closeAnswer() { document.getElementById('query-answer-area').style.display='none'; document.getElementById('query-input').value=''; }
+function setQuickQuery(t) {
+  document.getElementById('query-input').value = t;
+  document.getElementById('query-input').focus();
+}
+
+function closeAnswer() {
+  document.getElementById('query-answer-area').style.display = 'none';
+  document.getElementById('query-input').value = '';
+}
+
+function buildDataContext() {
+  if (!DATA || !CURRENT_MONTH) return '';
+  const md = DATA.months[CURRENT_MONTH];
+  if (!md) return '';
+  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+  const activeFilters = { month: md.label, bu: CURRENT_BU, platform: CURRENT_PLATFORM, adType: CURRENT_ADTYPE, format: CURRENT_FORMAT, category: CURRENT_CATEGORY, agency: CURRENT_AGENCY };
+  const buSummary = ['LCS1','LCS2','MM1','MM2','Others'].map(bu => {
+    const b = md.bu[bu] || {};
+    return bu + ': Del Rev ' + fmtNum(b.del_rev) + ' Cr, Booked ' + fmtNum(r2((b.booked_rev||0)/10000000)) + ' Cr, Clients ' + (b.clients||0) + ', vs LM ' + (b.growth_vs_lm ?? '—') + '%, vs LY ' + (b.growth_vs_ly ?? '—') + '%';
+  }).join('\n');
+  const platSummary = ['CTV','Mobile','Mobile+CTV'].map(p => {
+    const pl = md.platform[p] || {};
+    return p + ': Del Rev ' + fmtNum(pl.del_rev) + ' Cr, Booked ' + fmtNum(r2((pl.booked_rev||0)/10000000)) + ' Cr, Clients ' + (pl.clients||0) + ', vs LM ' + (pl.growth_vs_lm ?? '—') + '%, vs LY ' + (pl.growth_vs_ly ?? '—') + '%';
+  }).join('\n');
+  const videoData   = md.ad_type && md.ad_type.Video   ? md.ad_type.Video   : {};
+  const displayData = md.ad_type && md.ad_type.Display ? md.ad_type.Display : {};
+  const adTypeSummary = 'Video: Del Rev ' + fmtNum(videoData.del_rev) + ' Cr, Booked ' + fmtNum(r2((videoData.booked_rev||0)/10000000)) + ' Cr\nDisplay: Del Rev ' + fmtNum(displayData.del_rev) + ' Cr, Booked ' + fmtNum(r2((displayData.booked_rev||0)/10000000)) + ' Cr';
+  const clientSummary = (md.top_clients || []).slice(0,20).map(function(c,i) {
+    return (i+1) + '. ' + c.name + ' (' + c.bu + ') — Del Rev ' + fmtNum(c.del_rev) + ' Cr, Booked ' + fmtNum(r2((c.booked_rev||0)/10000000)) + ' Cr, Category: ' + (c.category||'—') + ', Agency: ' + (c.agency||'—');
+  }).join('\n');
+  const catSummary = (md.categories || []).slice(0,10).map(function(c,i) {
+    return (i+1) + '. ' + c.name + ': ' + fmtNum(c.del_rev) + ' Cr (' + c.clients + ' clients)';
+  }).join('\n');
+  const agSummary = (md.agencies || []).slice(0,9).map(function(ag,i) {
+    return (i+1) + '. ' + ag.name + ': ' + fmtNum(ag.del_rev) + ' Cr (' + ag.clients + ' clients)';
+  }).join('\n');
+  const overall = 'Month: ' + md.label + ' | Total Del Rev: ' + fmtNum(md.total_del_rev) + ' Cr | Active Clients: ' + md.total_clients +
+    (priorMd ? ' | vs Prior Month (' + priorMd.label + '): ' + (md.vs_prior_month && md.vs_prior_month.change_pct != null ? md.vs_prior_month.change_pct : '—') + '%' : '') +
+    (lyMd    ? ' | vs Last Year: '   + (md.vs_last_year  && md.vs_last_year.change_pct  != null ? md.vs_last_year.change_pct  : '—') + '%' : '');
+  return '=== JIOSTAR DIGITAL AD REVENUE — ' + md.label + ' ===\n\nOVERALL: ' + overall + '\n\nACTIVE FILTERS: ' + JSON.stringify(activeFilters) + '\n\nBU BREAKDOWN:\n' + buSummary + '\n\nPLATFORM SPLIT:\n' + platSummary + '\n\nAD TYPE:\n' + adTypeSummary + '\n\nTOP 20 CLIENTS:\n' + clientSummary + '\n\nTOP CATEGORIES:\n' + catSummary + '\n\nAGENCY PERFORMANCE:\n' + agSummary;
+}
+
 async function submitQuery() {
-  if (!document.getElementById('query-input').value.trim()) return;
-  document.getElementById('query-answer-area').style.display='block';
-  document.getElementById('answer-content').innerHTML=
-    '<div style="color:var(--ink-soft);font-size:13px">⏳ Gemini connects on Day 6. Data panels are live below. ✓</div>';
+  const input = document.getElementById('query-input');
+  const question = input.value.trim();
+  if (!question) return;
+  const answerArea    = document.getElementById('query-answer-area');
+  const answerContent = document.getElementById('answer-content');
+  answerArea.style.display = 'block';
+  answerContent.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--ink-soft);font-size:13px;padding:8px 0"><div style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;flex-shrink:0"></div>Gemini is analyzing your data...</div>';
+  const dataContext = buildDataContext();
+  const systemPrompt = 'You are a Revenue Intelligence Analyst for JioStar, India\'s leading digital streaming platform. Answer questions from senior revenue leaders clearly and precisely using only the data provided. Format responses as clean HTML (use <table>, <strong>, <ul> tags). Use Cr as the revenue unit. Highlight trends with ↑ or ↓. Do NOT use markdown, only HTML.';
+  const userMessage = 'Here is the current JioStar revenue data:\n\n' + dataContext + '\n\n---\n\nQuestion: ' + question;
+  try {
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/' + CONFIG.GEMINI_MODEL + ':generateContent?key=' + CONFIG.GEMINI_API_KEY,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 1500 },
+        }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err && err.error ? err.error.message : 'HTTP ' + res.status);
+    }
+    const data = await res.json();
+    const reply = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] ? data.candidates[0].content.parts[0].text : 'No response from Gemini.';
+    answerContent.innerHTML = '<div class="gemini-answer">' + reply + '</div>';
+  } catch(err) {
+    answerContent.innerHTML = '<div style="color:var(--red);font-size:13px">⚠️ Error: ' + err.message + '</div>';
+    console.error('Gemini error:', err);
+  }
 }
 
 // ── Formatters ────────────────────────────────────
