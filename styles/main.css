@@ -619,3 +619,34 @@ body {
 }
 .ptable tr:last-child td { border-bottom: none; }
 .ptable tbody tr:hover td { background: var(--surface); }
+/* Gemini spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Gemini answer formatting */
+.gemini-answer {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.gemini-answer table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.gemini-answer th {
+  background: var(--surface);
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid var(--border);
+}
+.gemini-answer td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.gemini-answer strong { color: var(--ink); }
+.gemini-answer ul { padding-left: 18px; margin: 6px 0; }
+.gemini-answer li { margin: 3px 0; }
