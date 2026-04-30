@@ -91,11 +91,69 @@ function attachListeners() {
     });
   });
 }
+// ── Flags / Diagnostic Layer ───────────────────────
+function renderFlags(md) {
+  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const flags = [];
 
+  const classify = (pct, label) => {
+    if (pct === null || pct === undefined) return;
+    if (pct <= -20)      flags.push({ cls: 'flag-red',   icon: '🔴', text: label + ' ' + pct + '% vs LM' });
+    else if (pct <= -10) flags.push({ cls: 'flag-amber', icon: '🟡', text: label + ' ' + pct + '% vs LM' });
+    else if (pct >= 20)  flags.push({ cls: 'flag-green', icon: '🟢', text: label + ' +' + pct + '% vs LM' });
+  };
+
+  // BU flags
+  ['LCS1','LCS2','MM1','MM2'].forEach(bu => {
+    const b = md.bu[bu] || {};
+    classify(b.growth_vs_lm ?? null, bu);
+  });
+
+  // Platform flags
+  ['CTV','Mobile','Mobile+CTV'].forEach(p => {
+    const pl = md.platform[p] || {};
+    classify(pl.growth_vs_lm ?? null, p);
+  });
+
+  // Category flags — top 10
+  (md.categories || []).slice(0, 10).forEach(cat => {
+    if (!priorMd) return;
+    const prior = (priorMd.categories || []).find(c => c.name === cat.name);
+    if (!prior || prior.del_rev <= 0) return;
+    const pct = r2(((cat.del_rev - prior.del_rev) / prior.del_rev) * 100);
+    classify(pct, cat.name);
+  });
+
+  // Agency flags
+  (md.agencies || []).forEach(ag => {
+    if (!priorMd) return;
+    const prior = (priorMd.agencies || []).find(a => a.name === ag.name);
+    if (!prior || prior.del_rev <= 0) return;
+    const pct = r2(((ag.del_rev - prior.del_rev) / prior.del_rev) * 100);
+    classify(pct, ag.name);
+  });
+
+  const row = document.getElementById('flags-row');
+  if (!flags.length) {
+    row.style.display = 'none';
+    return;
+  }
+
+  // Sort: red first, amber second, green last
+  const order = { 'flag-red': 0, 'flag-amber': 1, 'flag-green': 2 };
+  flags.sort((a, b) => order[a.cls] - order[b.cls]);
+
+  row.style.display = 'flex';
+  row.innerHTML =
+    '<div style="width:100%;font-size:11px;font-weight:600;color:var(--ink-soft);letter-spacing:0.05em;text-transform:uppercase;padding-bottom:4px">📊 Auto Diagnostics</div>' +
+    flags.map(f =>
+      '<span class="flag-pill ' + f.cls + '">' + f.icon + ' ' + f.text + '</span>'
+    ).join('');
+}
 // ── Render all ────────────────────────────────────
 function renderAll() {
   const md = DATA.months[CURRENT_MONTH]; if (!md) return;
-  renderHeader(md); renderKPIs(md);
+  renderHeader(md); renderKPIs(md); renderFlags(md);
   renderBU(md); renderPlatform(md); renderAdType(md);
   renderCategories(md); renderAgencies(md); renderClients(md);
 }
