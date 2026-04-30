@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles/main.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -95,7 +96,10 @@
     </div>
 
     <div class="sidebar-divider"></div>
-
+<div class="sidebar-section-label">Recent Queries</div>
+<div class="recent-queries" id="recent-queries" style="display:none;">
+</div>
+<div class="sidebar-divider"></div>
     <div class="sidebar-section-label">Quick Questions</div>
     <div class="quick-questions">
       <button class="quick-btn" onclick="setQuickQuery('Top 10 clients this month by delivered revenue')">Top 10 clients</button>
@@ -150,12 +154,22 @@
           <span class="answer-dot"></span>
           Gemini's answer
           <button id="copy-answer-btn" class="panel-export-btn" onclick="copyGeminiAnswer()" style="margin-left:8px">⎘ Copy</button>
+          <button class="panel-export-btn" onclick="exportDashboardPDF()" style="margin-left:4px">⬇ PDF</button>
           <button class="answer-close" onclick="closeAnswer()">✕</button>
         </div>
         <div class="answer-content" id="answer-content"></div>
       </div>
     </section>
-
+<div class="charts-row">
+  <div class="chart-card">
+    <div class="chart-title">BU Revenue — Current vs Last Year</div>
+    <canvas id="bu-chart" height="200"></canvas>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Platform Split</div>
+    <canvas id="platform-chart" height="200"></canvas>
+  </div>
+</div>
     <div class="panels-grid">
 
       <section class="panel panel-full">

@@ -6,6 +6,7 @@
 
 let DATA = null;
 let CURRENT_MONTH    = null;
+let CONVERSATION_HISTORY = [];
 let CURRENT_BU       = 'all';
 let CURRENT_PLATFORM = 'all';
 let CURRENT_ADTYPE   = 'all';
@@ -150,10 +151,83 @@ function renderFlags(md) {
       '<span class="flag-pill ' + f.cls + '">' + f.icon + ' ' + f.text + '</span>'
     ).join('');
 }
+let buChart = null;
+let platformChart = null;
+
+function renderCharts(md) {
+  const lyMd = DATA.months[lyMonthKey(CURRENT_MONTH)] || null;
+
+  // ── BU Bar Chart ──────────────────────────────────
+  const buLabels = ['LCS1','LCS2','MM1','MM2','Others'];
+  const buCurr   = buLabels.map(b => md.bu[b] ? r2(md.bu[b].del_rev) : 0);
+  const buLY     = buLabels.map(b => lyMd && lyMd.bu[b] ? r2(lyMd.bu[b].del_rev) : 0);
+
+  if (buChart) buChart.destroy();
+  const buCtx = document.getElementById('bu-chart').getContext('2d');
+  buChart = new Chart(buCtx, {
+    type: 'bar',
+    data: {
+      labels: buLabels,
+      datasets: [
+        {
+          label: md.label,
+          data: buCurr,
+          backgroundColor: 'rgba(59,130,246,0.85)',
+          borderRadius: 5,
+        },
+        {
+          label: lyMd ? lyMd.label : 'Last Year',
+          data: buLY,
+          backgroundColor: 'rgba(59,130,246,0.2)',
+          borderRadius: 5,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12 } },
+        tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.raw + ' Cr' } }
+      },
+      scales: {
+        y: { ticks: { callback: v => v + ' Cr', font: { size: 11 } }, grid: { color: '#f1f5f9' } },
+        x: { ticks: { font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+
+  // ── Platform Doughnut ─────────────────────────────
+  const platLabels = ['CTV','Mobile','Mobile+CTV'];
+  const platData   = platLabels.map(p => md.platform[p] ? r2(md.platform[p].del_rev) : 0);
+  const platColors = ['rgba(59,130,246,0.85)','rgba(16,185,129,0.85)','rgba(245,158,11,0.85)'];
+
+  if (platformChart) platformChart.destroy();
+  const platCtx = document.getElementById('platform-chart').getContext('2d');
+  platformChart = new Chart(platCtx, {
+    type: 'doughnut',
+    data: {
+      labels: platLabels,
+      datasets: [{
+        data: platData,
+        backgroundColor: platColors,
+        borderWidth: 2,
+        borderColor: '#fff',
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12 } },
+        tooltip: { callbacks: { label: ctx => ctx.label + ': ' + ctx.raw + ' Cr (' + Math.round(ctx.raw / (platData.reduce((a,b)=>a+b,0)||1) * 100) + '%)' } }
+      },
+      cutout: '65%',
+    }
+  });
+}
 // ── Render all ────────────────────────────────────
 function renderAll() {
   const md = DATA.months[CURRENT_MONTH]; if (!md) return;
-  renderHeader(md); renderKPIs(md);
+  renderHeader(md); renderKPIs(md); renderCharts(md);
   renderBU(md); renderPlatform(md); renderAdType(md);
   renderCategories(md); renderAgencies(md); renderClients(md); renderFlags(md);
 }
@@ -1248,7 +1322,7 @@ function renderCategories(md) {
 
     rows += `<tr style="${!isActive ? 'opacity:0.3' : ''}">
       <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
-      <td style="font-weight:500">${cat.name}</td>
+      <td style="font-weight:500">${cat.name} ${momPct !== null ? (momPct >= 20 ? '<span style="color:var(--green);font-size:11px">↑↑</span>' : momPct >= 5 ? '<span style="color:var(--green);font-size:11px">↑</span>' : momPct <= -20 ? '<span style="color:var(--red);font-size:11px">↓↓</span>' : momPct <= -5 ? '<span style="color:var(--red);font-size:11px">↓</span>' : '') : ''}</td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(curr.booked)} Cr</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
@@ -1462,6 +1536,10 @@ function renderAgencies(md) {
 
 // ── Top Clients ───────────────────────────────────
 function renderClients(md) {
+  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+  const lyClientNames    = new Set((lyMd?.top_clients    || []).map(c => c.name));
+  const priorClientNames = new Set((priorMd?.top_clients || []).map(c => c.name));
   const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
 
   // ── Same clientRevForFilters as other tables ─────────────────────────
@@ -1568,6 +1646,7 @@ function renderClients(md) {
       <td style="font-family:var(--mono);font-weight:500;text-align:right">${fmtNum(rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right">${fmtNum(booked)} Cr</td>
       <td style="font-size:12px;color:var(--ink-soft)">${c.category||'—'}</td>
+<td style="font-size:11px">${lyClientNames.has(c.name) ? '<span style="color:var(--green)">🔄 Repeat</span>' : '<span style="color:var(--accent)">🆕 New</span>'}</td>
       <td style="font-size:12px;color:var(--ink-soft)">${c.agency||'—'}</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.video_rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.display_rev)} Cr</td>
@@ -1598,6 +1677,7 @@ function renderClients(md) {
           <th style="text-align:right;min-width:76px">${revLabel}</th>
           <th style="text-align:right;min-width:76px">Booked</th>
           <th>Category</th>
+<th>vs LY</th>
           <th>Agency</th>
           <th style="text-align:right;min-width:68px">Video</th>
           <th style="text-align:right;min-width:68px">Display</th>
@@ -1710,13 +1790,27 @@ async function submitQuery() {
   const input = document.getElementById('query-input');
   const question = input.value.trim();
   if (!question) return;
+
   const answerArea    = document.getElementById('query-answer-area');
   const answerContent = document.getElementById('answer-content');
+
   answerArea.style.display = 'block';
   answerContent.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--ink-soft);font-size:13px;padding:8px 0"><div style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;flex-shrink:0"></div>Gemini is analyzing your data...</div>';
+
   const dataContext = buildDataContext();
-  const systemPrompt = 'You are a Revenue Intelligence Analyst for JioStar, India\'s leading digital streaming platform. Answer questions from senior revenue leaders clearly and precisely using only the data provided. Format responses as clean HTML (use <table>, <strong>, <ul> tags). Use Cr as the revenue unit. Highlight trends with ↑ or ↓. Do NOT use markdown, only HTML.';
-  const userMessage = 'Here is the current JioStar revenue data:\n\n' + dataContext + '\n\n---\n\nQuestion: ' + question;
+  const systemPrompt = 'You are a Revenue Intelligence Analyst for JioStar, India\'s leading digital streaming platform. Answer questions from senior revenue leaders clearly and precisely using only the data provided. Format responses as clean HTML (use <table>, <strong>, <ul> tags). Use Cr as the revenue unit. Highlight trends with ↑ or ↓. Do NOT use markdown, only HTML. You have memory of this conversation — if the user asks follow-up questions, refer to your previous answers.';
+
+  // Add current question to history
+  CONVERSATION_HISTORY.push({
+    role: 'user',
+    parts: [{ text: 'Here is the current JioStar revenue data:\n\n' + dataContext + '\n\n---\n\nQuestion: ' + question }]
+  });
+
+  // Keep only last 5 exchanges (10 messages)
+  if (CONVERSATION_HISTORY.length > 10) {
+    CONVERSATION_HISTORY = CONVERSATION_HISTORY.slice(-10);
+  }
+
   try {
     const res = await fetch(
       'https://generativelanguage.googleapis.com/v1beta/models/' + CONFIG.GEMINI_MODEL + ':generateContent?key=' + CONFIG.GEMINI_API_KEY,
@@ -1725,25 +1819,56 @@ async function submitQuery() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+          contents: CONVERSATION_HISTORY,
           generationConfig: { temperature: 0.2, maxOutputTokens: 1500 },
-tools: [{ googleSearch: {} }],
         }),
       }
     );
+
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err && err.error ? err.error.message : 'HTTP ' + res.status);
     }
+
     const data = await res.json();
-    const reply = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] ? data.candidates[0].content.parts[0].text : 'No response from Gemini.';
-    answerContent.innerHTML = '<div class="gemini-answer">' + reply + '</div>';
+    const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from Gemini.';
+
+    // Add Gemini's reply to history
+    CONVERSATION_HISTORY.push({
+      role: 'model',
+      parts: [{ text: reply }]
+    });
+
+    const historyCount = Math.floor(CONVERSATION_HISTORY.length / 2);
+    const clearBtn = historyCount > 1
+      ? `<button onclick="clearConversation()" style="margin-left:auto;font-size:11px;padding:2px 8px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--ink-soft);cursor:pointer">Clear (${historyCount} exchanges)</button>`
+      : '';
+
+    answerContent.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px;color:var(--ink-soft)">
+        <span>💬 ${historyCount > 1 ? historyCount + ' exchanges in this session' : 'New conversation'}</span>
+        ${clearBtn}
+      </div>
+      <div class="gemini-answer">${reply}</div>`;
+
   } catch(err) {
-    answerContent.innerHTML = '<div style="color:var(--red);font-size:13px">⚠️ Error: ' + err.message + '</div>';
+    answerContent.innerHTML = `<div style="color:var(--red);font-size:13px">⚠️ Error: ${err.message}</div>`;
     console.error('Gemini error:', err);
   }
+updateRecentQueries(question);
+  input.value = '';
+}
+
+function clearConversation() {
+  CONVERSATION_HISTORY = [];
+  document.getElementById('query-answer-area').style.display = 'none';
+  document.getElementById('query-input').value = '';
 }
 // ── Export / Copy ──────────────────────────────────
+function exportDashboardPDF() {
+  window.print();
+}
+
 function exportPanel(panelId, filename) {
   const panel = document.getElementById(panelId);
   if (!panel) return;
@@ -1791,6 +1916,22 @@ function copyGeminiAnswer() {
       setTimeout(() => { btn.textContent = '⎘ Copy'; }, 2000);
     }
   });
+}function updateRecentQueries(question) {
+  const container = document.getElementById('recent-queries');
+  if (!container) return;
+
+  // Get existing queries
+  let queries = JSON.parse(sessionStorage.getItem('recentQueries') || '[]');
+  
+  // Add new query, remove duplicates, keep last 5
+  queries = [question, ...queries.filter(q => q !== question)].slice(0, 5);
+  sessionStorage.setItem('recentQueries', JSON.stringify(queries));
+
+  // Render
+  container.style.display = queries.length ? 'flex' : 'none';
+  container.innerHTML = queries.map(q =>
+    `<button class="recent-query-btn" onclick="setQuickQuery('${q.replace(/'/g, "\\'")}')" title="${q}">${q}</button>`
+  ).join('');
 }
 // ── Formatters ────────────────────────────────────
 function fmtNum(n){const v=Number(n)||0; return v>=5?v.toFixed(1):v.toFixed(2);}
