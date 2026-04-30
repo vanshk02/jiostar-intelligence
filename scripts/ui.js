@@ -175,7 +175,28 @@ function renderKPIs(md) {
   const momC = md.vs_prior_month?.change_pct != null ? { pct: md.vs_prior_month.change_pct, label: 'vs '+md.vs_prior_month.label } : null;
   const lyC  = md.vs_last_year?.change_pct   != null ? { pct: md.vs_last_year.change_pct,   label: 'vs '+md.vs_last_year.label   } : null;
   const vPct = md.total_del_rev > 0 ? Math.round((md.ad_type.Video.del_rev/md.total_del_rev)*100) : 0;
-  const topBU = ['LCS1','LCS2','MM1','MM2'].map(b=>({name:b,rev:md.bu[b]?md.bu[b].del_rev:0})).sort((a,b)=>b.rev-a.rev)[0];
+  function renderKPIs(md) {
+  const momC = md.vs_prior_month?.change_pct != null ? { pct: md.vs_prior_month.change_pct, label: 'vs '+md.vs_prior_month.label } : null;
+  const lyC  = md.vs_last_year?.change_pct   != null ? { pct: md.vs_last_year.change_pct,   label: 'vs '+md.vs_last_year.label   } : null;
+  const vPct = md.total_del_rev > 0 ? Math.round((md.ad_type.Video.del_rev/md.total_del_rev)*100) : 0;
+
+  // CTV vs Mobile split (allocating Mobile+CTV proportionally)
+  const pureCTV    = md.platform['CTV']         ? md.platform['CTV'].del_rev         : 0;
+  const pureMobile = md.platform['Mobile']      ? md.platform['Mobile'].del_rev      : 0;
+  const mobCTV     = md.platform['Mobile+CTV']  ? md.platform['Mobile+CTV'].del_rev  : 0;
+  const pureTotal  = pureCTV + pureMobile;
+  const ctvRatio   = pureTotal > 0 ? pureCTV    / pureTotal : 0.5;
+  const mobRatio   = pureTotal > 0 ? pureMobile / pureTotal : 0.5;
+  const adjCTV     = r2(pureCTV    + mobCTV * ctvRatio);
+  const adjMobile  = r2(pureMobile + mobCTV * mobRatio);
+
+  document.getElementById('kpi-row').innerHTML = [
+    kpiCard('Total Del Rev',  md.total_del_rev, 'Cr', momC),
+    kpiCard('Active Clients', md.total_clients, '',   lyC),
+    kpiCard('CTV Rev',        adjCTV,           'Cr', null, 'incl. Mob+CTV split'),
+    kpiCard('Mobile Rev',     adjMobile,        'Cr', null, 'incl. Mob+CTV split'),
+  ].join('');
+}
   document.getElementById('kpi-row').innerHTML = [
     kpiCard('Total Del Rev',  md.total_del_rev,'Cr', momC),
     kpiCard('Active Clients', md.total_clients,'',   lyC),
@@ -1627,6 +1648,7 @@ async function submitQuery() {
           system_instruction: { parts: [{ text: systemPrompt }] },
           contents: [{ role: 'user', parts: [{ text: userMessage }] }],
           generationConfig: { temperature: 0.2, maxOutputTokens: 1500 },
+tools: [{ googleSearch: {} }],
         }),
       }
     );
