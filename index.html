@@ -132,7 +132,6 @@
       <div class="kpi-card skeleton"></div>
       <div class="kpi-card skeleton"></div>
     </section>
-<section class="flags-row" id="flags-row" style="display:none;"></section>
     <section class="query-section">
       <div class="query-box">
         <div class="query-icon">
@@ -150,6 +149,7 @@
         <div class="answer-label">
           <span class="answer-dot"></span>
           Gemini's answer
+          <button id="copy-answer-btn" class="panel-export-btn" onclick="copyGeminiAnswer()" style="margin-left:8px">⎘ Copy</button>
           <button class="answer-close" onclick="closeAnswer()">✕</button>
         </div>
         <div class="answer-content" id="answer-content"></div>
@@ -159,9 +159,10 @@
     <div class="panels-grid">
 
       <section class="panel panel-full">
-  <div class="panel-header">
-    <span class="panel-title">BU Breakdown</span>
+        <div class="panel-header">
+          <span class="panel-title">BU Breakdown</span>
           <span class="panel-tag">Delivered Revenue · Cr</span>
+          <button class="panel-export-btn" data-export="bu-panel" onclick="exportPanel('bu-panel','BU_Breakdown')">⎘ Export</button>
         </div>
         <div class="panel-body" id="bu-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
       </section>
@@ -170,6 +171,7 @@
     <div class="panel-header">
         <span class="panel-title">Platform Split</span>
           <span class="panel-tag">Del Rev · Cr</span>
+          <button class="panel-export-btn" data-export="platform-panel" onclick="exportPanel('platform-panel','Platform_Split')">⎘ Export</button>
         </div>
         <div class="panel-body" id="platform-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
       </section>
@@ -178,6 +180,7 @@
   <div class="panel-header">
     <span class="panel-title">Ad Type</span>
           <span class="panel-tag">Video vs Display</span>
+          <button class="panel-export-btn" data-export="adtype-panel" onclick="exportPanel('adtype-panel','Ad_Type')">⎘ Export</button>
         </div>
         <div class="panel-body" id="adtype-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
       </section>
@@ -186,6 +189,7 @@
         <div class="panel-header">
           <span class="panel-title">Category Leaderboard</span>
           <span class="panel-tag">Top 10 · Del Rev</span>
+          <button class="panel-export-btn" data-export="category-panel" onclick="exportPanel('category-panel','Category_Leaderboard')">⎘ Export</button>
         </div>
         <div class="panel-body" id="category-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
       </section>
@@ -194,6 +198,7 @@
         <div class="panel-header">
           <span class="panel-title">Agency Performance</span>
           <span class="panel-tag">Del Rev · Cr</span>
+          <button class="panel-export-btn" data-export="agency-panel" onclick="exportPanel('agency-panel','Agency_Performance')">⎘ Export</button>
         </div>
         <div class="panel-body" id="agency-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
       </section>
@@ -202,11 +207,13 @@
         <div class="panel-header">
           <span class="panel-title" id="clients-panel-title">Top Clients</span>
           <span class="panel-tag">By Delivered Revenue</span>
+          <button class="panel-export-btn" data-export="clients-panel" onclick="exportPanel('clients-panel','Top_Clients')">⎘ Export</button>
         </div>
         <div class="panel-body" id="clients-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
       </section>
 
-    </div>
+    </div>  <!-- closing of panels-grid -->
+    <section class="flags-row" id="flags-row" style="display:none;"></section>
   </main>
 
   <script src="config.js"></script>
