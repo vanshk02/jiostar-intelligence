@@ -1478,31 +1478,74 @@ function buildDataContext() {
   if (!md) return '';
   const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
   const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+
   const activeFilters = { month: md.label, bu: CURRENT_BU, platform: CURRENT_PLATFORM, adType: CURRENT_ADTYPE, format: CURRENT_FORMAT, category: CURRENT_CATEGORY, agency: CURRENT_AGENCY };
-  const buSummary = ['LCS1','LCS2','MM1','MM2','Others'].map(bu => {
+
+  // BU summary — full comparative
+  const buSummary = ['LCS1','LCS2','MM1','MM2','Others'].map(function(bu) {
     const b = md.bu[bu] || {};
     return bu + ': Del Rev ' + fmtNum(b.del_rev) + ' Cr, Booked ' + fmtNum(r2((b.booked_rev||0)/10000000)) + ' Cr, Clients ' + (b.clients||0) + ', vs LM ' + (b.growth_vs_lm ?? '—') + '%, vs LY ' + (b.growth_vs_ly ?? '—') + '%';
   }).join('\n');
-  const platSummary = ['CTV','Mobile','Mobile+CTV'].map(p => {
+
+  // Platform summary — full comparative
+  const platSummary = ['CTV','Mobile','Mobile+CTV'].map(function(p) {
     const pl = md.platform[p] || {};
     return p + ': Del Rev ' + fmtNum(pl.del_rev) + ' Cr, Booked ' + fmtNum(r2((pl.booked_rev||0)/10000000)) + ' Cr, Clients ' + (pl.clients||0) + ', vs LM ' + (pl.growth_vs_lm ?? '—') + '%, vs LY ' + (pl.growth_vs_ly ?? '—') + '%';
   }).join('\n');
+
+  // Ad Type summary — with vs LM and vs LY
   const videoData   = md.ad_type && md.ad_type.Video   ? md.ad_type.Video   : {};
   const displayData = md.ad_type && md.ad_type.Display ? md.ad_type.Display : {};
-  const adTypeSummary = 'Video: Del Rev ' + fmtNum(videoData.del_rev) + ' Cr, Booked ' + fmtNum(r2((videoData.booked_rev||0)/10000000)) + ' Cr\nDisplay: Del Rev ' + fmtNum(displayData.del_rev) + ' Cr, Booked ' + fmtNum(r2((displayData.booked_rev||0)/10000000)) + ' Cr';
-  const clientSummary = (md.top_clients || []).slice(0,20).map(function(c,i) {
-    return (i+1) + '. ' + c.name + ' (' + c.bu + ') — Del Rev ' + fmtNum(c.del_rev) + ' Cr, Booked ' + fmtNum(r2((c.booked_rev||0)/10000000)) + ' Cr, Category: ' + (c.category||'—') + ', Agency: ' + (c.agency||'—');
-  }).join('\n');
+  const priorVideo   = priorMd && priorMd.ad_type && priorMd.ad_type.Video   ? priorMd.ad_type.Video   : {};
+  const priorDisplay = priorMd && priorMd.ad_type && priorMd.ad_type.Display ? priorMd.ad_type.Display : {};
+  const lyVideo      = lyMd    && lyMd.ad_type    && lyMd.ad_type.Video      ? lyMd.ad_type.Video      : {};
+  const lyDisplay    = lyMd    && lyMd.ad_type    && lyMd.ad_type.Display    ? lyMd.ad_type.Display    : {};
+  const vMom = priorVideo.del_rev   > 0 ? r2(((videoData.del_rev   - priorVideo.del_rev)   / priorVideo.del_rev)   * 100) : null;
+  const vLy  = lyVideo.del_rev      > 0 ? r2(((videoData.del_rev   - lyVideo.del_rev)      / lyVideo.del_rev)      * 100) : null;
+  const dMom = priorDisplay.del_rev > 0 ? r2(((displayData.del_rev - priorDisplay.del_rev) / priorDisplay.del_rev) * 100) : null;
+  const dLy  = lyDisplay.del_rev    > 0 ? r2(((displayData.del_rev - lyDisplay.del_rev)    / lyDisplay.del_rev)    * 100) : null;
+  const adTypeSummary =
+    'Video: Del Rev ' + fmtNum(videoData.del_rev) + ' Cr, Booked ' + fmtNum(r2((videoData.booked_rev||0)/10000000)) + ' Cr, vs LM ' + (vMom ?? '—') + '%, vs LY ' + (vLy ?? '—') + '%\n' +
+    'Display: Del Rev ' + fmtNum(displayData.del_rev) + ' Cr, Booked ' + fmtNum(r2((displayData.booked_rev||0)/10000000)) + ' Cr, vs LM ' + (dMom ?? '—') + '%, vs LY ' + (dLy ?? '—') + '%';
+
+  // Categories — with vs LM and vs LY
   const catSummary = (md.categories || []).slice(0,10).map(function(c,i) {
-    return (i+1) + '. ' + c.name + ': ' + fmtNum(c.del_rev) + ' Cr (' + c.clients + ' clients)';
+    const prior = ((priorMd && priorMd.categories) || []).find(function(x){return x.name===c.name;});
+    const ly    = ((lyMd    && lyMd.categories)    || []).find(function(x){return x.name===c.name;});
+    const momPct = prior && prior.del_rev > 0 ? r2(((c.del_rev - prior.del_rev)/prior.del_rev)*100) : null;
+    const lyPct  = ly    && ly.del_rev    > 0 ? r2(((c.del_rev - ly.del_rev)   /ly.del_rev)   *100) : null;
+    return (i+1) + '. ' + c.name + ': ' + fmtNum(c.del_rev) + ' Cr (' + c.clients + ' clients), vs LM: ' + (momPct !== null ? (momPct > 0 ? '+' : '') + momPct + '%' : '—') + ', vs LY: ' + (lyPct !== null ? (lyPct > 0 ? '+' : '') + lyPct + '%' : '—');
   }).join('\n');
+
+  // Agencies — with vs LM and vs LY
   const agSummary = (md.agencies || []).slice(0,9).map(function(ag,i) {
-    return (i+1) + '. ' + ag.name + ': ' + fmtNum(ag.del_rev) + ' Cr (' + ag.clients + ' clients)';
+    const prior = ((priorMd && priorMd.agencies) || []).find(function(x){return x.name===ag.name;});
+    const ly    = ((lyMd    && lyMd.agencies)    || []).find(function(x){return x.name===ag.name;});
+    const momPct = prior && prior.del_rev > 0 ? r2(((ag.del_rev - prior.del_rev)/prior.del_rev)*100) : null;
+    const lyPct  = ly    && ly.del_rev    > 0 ? r2(((ag.del_rev - ly.del_rev)   /ly.del_rev)   *100) : null;
+    return (i+1) + '. ' + ag.name + ': ' + fmtNum(ag.del_rev) + ' Cr (' + ag.clients + ' clients), vs LM: ' + (momPct !== null ? (momPct > 0 ? '+' : '') + momPct + '%' : '—') + ', vs LY: ' + (lyPct !== null ? (lyPct > 0 ? '+' : '') + lyPct + '%' : '—');
   }).join('\n');
+
+  // Top 20 clients — with vs LM comparison
+  const clientSummary = (md.top_clients || []).slice(0,20).map(function(c,i) {
+    const priorClient = ((priorMd && priorMd.top_clients) || []).find(function(x){return x.name===c.name;});
+    const momPct = priorClient && priorClient.del_rev > 0 ? r2(((c.del_rev - priorClient.del_rev)/priorClient.del_rev)*100) : null;
+    return (i+1) + '. ' + c.name + ' (' + c.bu + ') — Del Rev ' + fmtNum(c.del_rev) + ' Cr, Booked ' + fmtNum(r2((c.booked_rev||0)/10000000)) + ' Cr, vs LM: ' + (momPct !== null ? (momPct > 0 ? '+' : '') + momPct + '%' : '—') + ', Category: ' + (c.category||'—') + ', Agency: ' + (c.agency||'—');
+  }).join('\n');
+
+  // Overall
   const overall = 'Month: ' + md.label + ' | Total Del Rev: ' + fmtNum(md.total_del_rev) + ' Cr | Active Clients: ' + md.total_clients +
     (priorMd ? ' | vs Prior Month (' + priorMd.label + '): ' + (md.vs_prior_month && md.vs_prior_month.change_pct != null ? md.vs_prior_month.change_pct : '—') + '%' : '') +
     (lyMd    ? ' | vs Last Year: '   + (md.vs_last_year  && md.vs_last_year.change_pct  != null ? md.vs_last_year.change_pct  : '—') + '%' : '');
-  return '=== JIOSTAR DIGITAL AD REVENUE — ' + md.label + ' ===\n\nOVERALL: ' + overall + '\n\nACTIVE FILTERS: ' + JSON.stringify(activeFilters) + '\n\nBU BREAKDOWN:\n' + buSummary + '\n\nPLATFORM SPLIT:\n' + platSummary + '\n\nAD TYPE:\n' + adTypeSummary + '\n\nTOP 20 CLIENTS:\n' + clientSummary + '\n\nTOP CATEGORIES:\n' + catSummary + '\n\nAGENCY PERFORMANCE:\n' + agSummary;
+
+  return '=== JIOSTAR DIGITAL AD REVENUE — ' + md.label + ' ===\n\nOVERALL: ' + overall +
+    '\n\nACTIVE FILTERS: ' + JSON.stringify(activeFilters) +
+    '\n\nBU BREAKDOWN:\n' + buSummary +
+    '\n\nPLATFORM SPLIT:\n' + platSummary +
+    '\n\nAD TYPE:\n' + adTypeSummary +
+    '\n\nTOP CATEGORIES (with growth):\n' + catSummary +
+    '\n\nAGENCY PERFORMANCE (with growth):\n' + agSummary +
+    '\n\nTOP 20 CLIENTS:\n' + clientSummary;
 }
 
 async function submitQuery() {
