@@ -650,3 +650,31 @@ body {
 .gemini-answer strong { color: var(--ink); }
 .gemini-answer ul { padding-left: 18px; margin: 6px 0; }
 .gemini-answer li { margin: 3px 0; }
+/* Flags row */
+.flags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 24px 16px;
+}
+.flag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+.flag-red    { background: rgba(220,53,69,0.08);  border-color: rgba(220,53,69,0.25);  color: #dc3545; }
+.flag-amber  { background: rgba(255,152,0,0.08);  border-color: rgba(255,152,0,0.25);  color: #e65100; }
+.flag-green  { background: rgba(40,167,69,0.08);  border-color: rgba(40,167,69,0.25);  color: #28a745; }
+.flags-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 6px 24px 2px;
+}
