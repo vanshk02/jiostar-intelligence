@@ -1,5 +1,5 @@
 const CONFIG = {
-  GEMINI_API_KEY: "AIzaSyBpVWheLbg3EtQOdTPQ68xc0mJagf6IIj4",
+  GEMINI_API_KEY: "AIzaSyCOv-vveUVkzf1T83p3-Ql5PsNN8qCsd8c",
   GEMINI_MODEL: "gemini-2.5-flash",
   ORG_NAME: "JioStar",
   CURRENT_FY: "FY26",
