@@ -252,6 +252,7 @@ function renderKPIs(md) {
   const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_PLATFORM !== 'all' ||
     CURRENT_ADTYPE !== 'all' || CURRENT_FORMAT !== 'all' ||
     CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all';
+    const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
 
   // ── Get filtered clients pool ──────────────────────────────
   let filteredClients = (md.top_clients || []).slice();
@@ -347,15 +348,32 @@ function renderKPIs(md) {
   // ── Booked Ach% ────────────────────────────────────────────
   const achPct = totalBooked > 0 ? r2((totalRev / totalBooked) * 100) : 0;
 
+  // CTV/Mobile vs LM
+  const ctvPrior    = !anyFilterActive && priorMd && md.platform['CTV']    ? priorMd.platform['CTV']?.del_rev    : null;
+  const mobPrior    = !anyFilterActive && priorMd && md.platform['Mobile'] ? priorMd.platform['Mobile']?.del_rev : null;
+  const ctvMomPct   = ctvPrior > 0 ? r2(((adjCTV    - ctvPrior) / ctvPrior) * 100) : null;
+  const mobMomPct   = mobPrior > 0 ? r2(((adjMobile - mobPrior) / mobPrior) * 100) : null;
+  const ctvMomC     = ctvMomPct !== null ? { pct: ctvMomPct, label: 'vs ' + (priorMd?.label || 'LM') } : null;
+  const mobMomC     = mobMomPct !== null ? { pct: mobMomPct, label: 'vs ' + (priorMd?.label || 'LM') } : null;
+
+  // Video/Display share
+  const totalRevForShare = videoRev + displayRev || 1;
+  const videoPct   = Math.round((videoRev   / totalRevForShare) * 100);
+  const displayPct = Math.round((displayRev / totalRevForShare) * 100);
+
+  // Top BU growth
+  const topBUData  = !anyFilterActive ? md.bu[topBU.name] || {} : {};
+  const topBUMomC  = topBUData.growth_vs_lm != null ? { pct: topBUData.growth_vs_lm, label: 'vs LM' } : null;
+
   document.getElementById('kpi-row').innerHTML = [
-    kpiCard('Total Del Rev',  totalRev,         'Cr', momC),
-    kpiCard('Active Clients', totalClients,     '',   lyC),
-    kpiCard('CTV Rev',        adjCTV,           'Cr', null, 'incl. Mob+CTV split'),
-    kpiCard('Mobile Rev',     adjMobile,        'Cr', null, 'incl. Mob+CTV split'),
-    kpiCard('Video Rev',      videoRev,         'Cr', null, 'of filtered revenue'),
-    kpiCard('Display Rev',    displayRev,       'Cr', null, 'of filtered revenue'),
-    kpiCard('Top BU',         topBU.rev,        'Cr', null, topBU.name+' leading'),
-    kpiCard('Booked Ach%',    achPct,           '%',  null, 'del vs booked'),
+    kpiCard('Total Del Rev',  totalRev,      'Cr', momC),
+    kpiCard('Active Clients', totalClients,  '',   lyC),
+    kpiCard('CTV Rev',        adjCTV,        'Cr', ctvMomC,  ctvMomC  ? null : 'incl. Mob+CTV split'),
+    kpiCard('Mobile Rev',     adjMobile,     'Cr', mobMomC,  mobMomC  ? null : 'incl. Mob+CTV split'),
+    kpiCard('Video Rev',      videoRev,      'Cr', null,     videoPct + '% of total ad rev'),
+    kpiCard('Display Rev',    displayRev,    'Cr', null,     displayPct + '% of total ad rev'),
+    kpiCard('Top BU',         topBU.rev,     'Cr', topBUMomC, topBU.name + ' leading'),
+    kpiCard('Booked Ach%',    achPct,        '%',  null,     fmtNum(r2(totalRev)) + ' del · ' + fmtNum(r2(totalBooked)) + ' booked'),
   ].join('');
 }
 function kpiCard(label,val,unit,ch,note) {
