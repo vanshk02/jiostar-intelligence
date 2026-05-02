@@ -798,3 +798,214 @@ body {
   body { overflow: visible !important; }
   .main { overflow: visible !important; }
 }
+/* ── Brief Me output ───────────────────────────── */
+.brief-output {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+.brief-headline {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  padding: 14px 18px;
+  background: var(--navy);
+  color: #fff;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.brief-section {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.7;
+}
+
+.brief-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.brief-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 5px;
+}
+/* ── Client deep-dive drawer ───────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+#dive-drawer.open {
+  display: flex !important;
+  animation: slideInRight 0.25s cubic-bezier(0.4,0,0.2,1);
+}
+
+#dive-overlay.open {
+  display: block !important;
+}
+
+.dive-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.dive-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+
+.dive-stat-val {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.dive-stat-sub {
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+
+.mix-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.mix-label {
+  width: 90px;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.mix-bar-bg {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.mix-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.4s cubic-bezier(0.4,0,0.2,1);
+}
+
+.mix-val {
+  width: 52px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-mid);
+  flex-shrink: 0;
+}
+
+.talk-point {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-radius: 8px;
+  border-left: 3px solid var(--accent);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+/* ── Meeting mode ──────────────────────────────── */
+#meeting-overlay.active {
+  display: flex !important;
+  flex-direction: column;
+  animation: fadeIn 0.2s ease;
+}
+
+/* Override table styles for dark mode in meeting */
+#meeting-slide-content .ptable th {
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.5);
+  border-bottom-color: rgba(255,255,255,0.08);
+}
+
+#meeting-slide-content .ptable td {
+  color: rgba(255,255,255,0.85);
+  border-bottom-color: rgba(255,255,255,0.05);
+}
+
+#meeting-slide-content .ptable tbody tr:hover td {
+  background: rgba(255,255,255,0.04);
+}
+
+#meeting-slide-content .ptable {
+  font-size: 14px;
+}
+
+.meeting-kpi-mini {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.meeting-kpi-mini .kpi-label {
+  color: rgba(255,255,255,0.4);
+  font-size: 9px;
+}
+
+.meeting-kpi-mini .kpi-value {
+  color: #fff;
+  font-size: 18px;
+}
+
+.meeting-kpi-mini .kpi-unit {
+  color: rgba(255,255,255,0.4);
+  font-size: 11px;
+}
+
+.meeting-kpi-mini .kpi-change.up   { color: #10B981; }
+.meeting-kpi-mini .kpi-change.down { color: #EF4444; }
+.meeting-kpi-mini .kpi-change.flat { color: rgba(255,255,255,0.4); }
+
+.meeting-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.meeting-dot.active {
+  background: var(--accent);
+  transform: scale(1.3);
+}
+
+/* Bubble chart dark override in meeting mode */
+#meeting-slide-content canvas {
+  filter: none;
+}

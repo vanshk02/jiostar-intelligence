@@ -153,6 +153,8 @@ function renderFlags(md) {
 }
 let buChart = null;
 let platformChart = null;
+let bubbleChart = null;
+let diveChart = null;
 
 function renderCharts(md) {
   const lyMd = DATA.months[lyMonthKey(CURRENT_MONTH)] || null;
@@ -224,12 +226,185 @@ function renderCharts(md) {
     }
   });
 }
+
+// ── Category Bubble Map ───────────────────────────
+function renderBubbleMap(md) {
+  const lyMd = DATA.months[lyMonthKey(CURRENT_MONTH)] || null;
+
+  // Build one data point per category
+  const X_CAP = 300;
+
+  const bubbleData = (md.categories || []).map(cat => {
+    const lyCat   = lyMd ? (lyMd.categories || []).find(c => c.name === cat.name) : null;
+    const rawVsLY = lyCat && lyCat.del_rev > 0
+      ? r2(((cat.del_rev - lyCat.del_rev) / lyCat.del_rev) * 100)
+      : 0;
+    const capped  = rawVsLY > X_CAP;
+    return {
+      name:    cat.name,
+      x:       capped ? X_CAP : rawVsLY,
+      y:       r2(cat.del_rev),
+      r:       Math.max(7, Math.min(30, (cat.clients || 1) * 2.2)),
+      clients: cat.clients || 0,
+      rawVsLY,
+      capped,
+    };
+  }).filter(d => d.y > 0);
+
+  // Median revenue — horizontal divider
+  const sorted    = bubbleData.map(d => d.y).sort((a, b) => a - b);
+  const medianRev = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+
+  // Colour each bubble by quadrant
+  const bubbleColor = d => {
+    if (d.x >= 0 && d.y >= medianRev) return 'rgba(16,185,129,0.80)';
+    if (d.x <  0 && d.y >= medianRev) return 'rgba(245,158,11,0.80)';
+    if (d.x >= 0 && d.y <  medianRev) return 'rgba(59,130,246,0.80)';
+    return 'rgba(100,116,139,0.55)';
+  };
+
+  // Highlight active category
+  const activeCat = CURRENT_CATEGORY !== 'all' ? CURRENT_CATEGORY : null;
+  const colors    = bubbleData.map(d =>
+    activeCat ? (d.name === activeCat ? bubbleColor(d) : 'rgba(203,213,225,0.4)') : bubbleColor(d)
+  );
+
+  // Custom plugin — quadrant backgrounds + divider lines + labels
+  const quadrantPlugin = {
+    id: 'quadrants',
+    beforeDraw(chart) {
+      const { ctx, chartArea: { left, right, top, bottom }, scales: { x, y } } = chart;
+      const cx = x.getPixelForValue(0);
+      const cy = y.getPixelForValue(medianRev);
+      ctx.save();
+
+      // Quadrant fills
+      const fills = [
+        { x: cx,   y: top,  w: right - cx,  h: cy - top,    color: 'rgba(16,185,129,0.04)'  },
+        { x: left, y: top,  w: cx - left,   h: cy - top,    color: 'rgba(245,158,11,0.04)'  },
+        { x: cx,   y: cy,   w: right - cx,  h: bottom - cy, color: 'rgba(59,130,246,0.04)'  },
+        { x: left, y: cy,   w: cx - left,   h: bottom - cy, color: 'rgba(100,116,139,0.04)' },
+      ];
+      fills.forEach(f => { ctx.fillStyle = f.color; ctx.fillRect(f.x, f.y, f.w, f.h); });
+
+      // Divider lines
+      ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+      ctx.setLineDash([5, 5]);
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cx, top);  ctx.lineTo(cx, bottom); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(left, cy); ctx.lineTo(right, cy);  ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Quadrant labels
+      const labels = [
+        { text: 'DOUBLE DOWN',  color: 'rgba(16,185,129,0.7)',  x: cx + 8,   y: top + 14    },
+        { text: 'DEFEND',       color: 'rgba(245,158,11,0.7)',  x: left + 8, y: top + 14    },
+        { text: 'INVEST',       color: 'rgba(59,130,246,0.7)',  x: cx + 8,   y: bottom - 10 },
+        { text: 'DEPRIORITIZE', color: 'rgba(100,116,139,0.6)', x: left + 8, y: bottom - 10 },
+      ];
+      ctx.font = '600 10px DM Sans, sans-serif';
+      labels.forEach(l => { ctx.fillStyle = l.color; ctx.fillText(l.text, l.x, l.y); });
+      ctx.restore();
+    },
+    afterDraw(chart) {
+      const { ctx, scales: { x, y } } = chart;
+      ctx.save();
+      ctx.textAlign = 'left';
+      bubbleData.forEach((d, i) => {
+        const px       = x.getPixelForValue(d.x);
+        const py       = y.getPixelForValue(d.y);
+        const rad      = chart.data.datasets[0].data[i].r;
+        const isActive = activeCat ? d.name === activeCat : true;
+
+        // Only draw inline label for large bubbles (r >= 14) or the active one
+        const showLabel = rad >= 14 || (activeCat && d.name === activeCat);
+        if (!showLabel) return;
+
+        ctx.font      = '500 10px DM Sans, sans-serif';
+        ctx.fillStyle = isActive ? '#334155' : 'rgba(148,163,184,0.5)';
+        const label   = d.capped ? d.name + ' ❯' : d.name;
+        ctx.fillText(label, px + rad + 4, py + 4);
+      });
+      ctx.restore();
+    }
+  };
+
+  if (bubbleChart) bubbleChart.destroy();
+  const canvas = document.getElementById('bubble-chart');
+  if (!canvas) return;
+
+  bubbleChart = new Chart(canvas.getContext('2d'), {
+    type:    'bubble',
+    plugins: [quadrantPlugin],
+    data: {
+      datasets: [{
+        data:            bubbleData,
+        backgroundColor: colors,
+        borderColor:     colors.map(c => c.replace(/[\d.]+\)$/, '1)')),
+        borderWidth:     1.5,
+      }]
+    },
+    options: {
+      responsive:          true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: ctx => ctx[0].raw.name,
+            label: ctx => {
+              const d = ctx.raw;
+              const vsLYDisplay = d.capped
+                ? `>${X_CAP}% (actual: +${d.rawVsLY}%)`
+                : `${d.rawVsLY > 0 ? '+' : ''}${d.rawVsLY}%`;
+              return [
+                `Revenue: ${fmtNum(d.y)} Cr`,
+                `vs Last Year: ${vsLYDisplay}`,
+                `Clients: ${d.clients}`,
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Growth vs Last Year (%)', font: { size: 11 }, color: '#64748B' },
+          grid:  { color: 'rgba(0,0,0,0.04)' },
+          max:   X_CAP,
+          ticks: {
+            font: { size: 11 },
+            callback: v => v === X_CAP ? '≥300%' : v + '%'
+          },
+        },
+        y: {
+          title: { display: true, text: 'Delivered Revenue (Cr)', font: { size: 11 }, color: '#64748B' },
+          grid:  { color: 'rgba(0,0,0,0.04)' },
+          ticks: { font: { size: 11 }, callback: v => v + ' Cr' },
+        }
+      },
+      onClick(e, elements) {
+        const sel = document.getElementById('category-select');
+        if (!sel) return;
+        if (elements.length) {
+          const d = bubbleData[elements[0].index];
+          sel.value        = d.name;
+          CURRENT_CATEGORY = d.name;
+        } else {
+          // Click on empty area — reset category filter
+          sel.value        = 'all';
+          CURRENT_CATEGORY = 'all';
+        }
+        renderAll();
+      }
+    }
+  });
+}
 // ── Render all ────────────────────────────────────
 function renderAll() {
   const md = DATA.months[CURRENT_MONTH]; if (!md) return;
-  renderHeader(md); renderKPIs(md); renderCharts(md);
+  renderHeader(md); renderKPIs(md); renderCharts(md); renderBubbleMap(md);
   renderBU(md); renderPlatform(md); renderAdType(md);
-  renderCategories(md); renderAgencies(md); renderClients(md); renderFlags(md);
+  renderCategories(md); renderAgencies(md); renderClients(md); renderCohort(); renderChurners(); renderFlags(md);
 }
 
 // ── Header ────────────────────────────────────────
@@ -338,15 +513,37 @@ function renderKPIs(md) {
     displayRev = r2(filteredClients.reduce((t,c) => t + (c.display_rev ?? 0), 0));
   }
 
-  // ── Top BU ─────────────────────────────────────────────────
-  const topBU = ['LCS1','LCS2','MM1','MM2'].map(b => {
-    if (!anyFilterActive) return { name: b, rev: md.bu[b] ? md.bu[b].del_rev : 0 };
-    const buClients = filterClientsByBU(filteredClients, b);
-    return { name: b, rev: r2(buClients.reduce((t,c) => t + clientRevForFilters(c), 0)) };
-  }).sort((a,b) => b.rev - a.rev)[0];
+  // ── Biggest Mover ──────────────────────────────────────────
+  const buMovers = ['LCS1','LCS2','MM1','MM2'].map(bu => {
+    const curr  = md.bu[bu] ? md.bu[bu].del_rev : 0;
+    const prior = priorMd && priorMd.bu[bu] ? priorMd.bu[bu].del_rev : 0;
+    const pct   = prior > 0 ? r2(((curr - prior) / prior) * 100) : null;
+    return { name: bu, type: 'BU', delta: r2(curr - prior), pct };
+  });
+  const catMovers = (md.categories || []).slice(0, 8).map(cat => {
+    const prior    = (priorMd?.categories || []).find(c => c.name === cat.name);
+    const priorRev = prior ? prior.del_rev : 0;
+    const delta    = r2(cat.del_rev - priorRev);
+    const pct      = priorRev > 0 ? r2(((cat.del_rev - priorRev) / priorRev) * 100) : null;
+    return { name: cat.name, type: 'Category', delta, pct };
+  });
+  const allMovers = [...buMovers, ...catMovers].filter(m => m.delta > 0).sort((a, b) => b.delta - a.delta);
+  const topMover  = allMovers[0] || null;
 
-  // ── Booked Ach% ────────────────────────────────────────────
-  const achPct = totalBooked > 0 ? r2((totalRev / totalBooked) * 100) : 0;
+  // ── Next Month Pipeline ─────────────────────────────────────
+  const nextMKey    = nextMonthKey(CURRENT_MONTH);
+  const nextMd      = DATA.months[nextMKey] || null;
+  const lyNextMd    = DATA.months[lyMonthKey(nextMKey)] || null;
+  const nextBooked  = nextMd
+    ? r2(['LCS1','LCS2','MM1','MM2'].reduce((t, bu) => t + (nextMd.bu[bu] ? (nextMd.bu[bu].booked_rev || 0) / 10000000 : 0), 0))
+    : null;
+  const lyNextDel   = lyNextMd ? lyNextMd.total_del_rev : null;
+  const nextVsLyPct = (nextBooked !== null && lyNextDel && lyNextDel > 0)
+    ? r2(((nextBooked - lyNextDel) / lyNextDel) * 100)
+    : null;
+    const nextVsCurrPct = (nextBooked !== null && totalRev && totalRev > 0)
+    ? r2(((nextBooked - totalRev) / totalRev) * 100)
+    : null;
 
   // CTV/Mobile vs LM
   const ctvPrior    = !anyFilterActive && priorMd && md.platform['CTV']    ? priorMd.platform['CTV']?.del_rev    : null;
@@ -361,9 +558,7 @@ function renderKPIs(md) {
   const videoPct   = Math.round((videoRev   / totalRevForShare) * 100);
   const displayPct = Math.round((displayRev / totalRevForShare) * 100);
 
-  // Top BU growth
-  const topBUData  = !anyFilterActive ? md.bu[topBU.name] || {} : {};
-  const topBUMomC  = topBUData.growth_vs_lm != null ? { pct: topBUData.growth_vs_lm, label: 'vs LM' } : null;
+  
 
   document.getElementById('kpi-row').innerHTML = [
     kpiCard('Total Del Rev',  totalRev,      'Cr', momC),
@@ -372,8 +567,24 @@ function renderKPIs(md) {
     kpiCard('Mobile Rev',     adjMobile,     'Cr', mobMomC,  mobMomC  ? null : 'incl. Mob+CTV split'),
     kpiCard('Video Rev',      videoRev,      'Cr', null,     videoPct + '% of total ad rev'),
     kpiCard('Display Rev',    displayRev,    'Cr', null,     displayPct + '% of total ad rev'),
-    kpiCard('Top BU',         topBU.rev,     'Cr', topBUMomC, topBU.name + ' leading'),
-    kpiCard('Booked Ach%',    achPct,        '%',  null,     fmtNum(r2(totalRev)) + ' del · ' + fmtNum(r2(totalBooked)) + ' booked'),
+    topMover
+      ? `<div class="kpi-card">
+          <div class="kpi-label">Biggest mover this month</div>
+          <div style="font-size:22px;font-weight:600;color:var(--ink);letter-spacing:-0.02em;margin:6px 0 6px;line-height:1.2">${topMover.name}</div>
+          <div style="font-size:13px;font-family:var(--mono);font-weight:500;color:var(--green)">+${fmtNum(topMover.delta)} Cr vs last month</div>
+          <div style="font-size:11px;color:var(--ink-soft);margin-top:3px">${topMover.type} · largest absolute gain</div>
+        </div>`
+      : kpiCard('Biggest mover', 0, 'Cr', null, 'No prior month data'),
+    nextBooked !== null
+      ? `<div class="kpi-card">
+          <div class="kpi-label">Next month pipeline</div>
+          <div class="kpi-value" style="margin:6px 0 4px">${fmtNum(nextBooked)}<span class="kpi-unit"> Cr</span></div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-bottom:4px">Confirmed bookings · ${nextMd ? nextMd.label : ''}</div>
+          ${nextVsCurrPct !== null
+            ? `<div class="kpi-change ${nextVsCurrPct >= 0 ? 'up' : 'down'}">${nextVsCurrPct >= 0 ? '↑' : '↓'} ${Math.abs(nextVsCurrPct)}% ${nextVsCurrPct >= 0 ? 'ahead of' : 'behind'} ${md.label} delivered</div>`
+            : ''}
+        </div>`
+      : kpiCard('Next month pipeline', 0, 'Cr', null, 'No bookings data yet'),
   ].join('');
 }
 function kpiCard(label,val,unit,ch,note) {
@@ -1659,7 +1870,7 @@ function renderClients(md) {
 
     return `<tr>
       <td class="rank">${i+1}</td>
-      <td><span style="font-weight:500">${c.name}</span>${expandBtn}</td>
+      <td><span style="font-weight:500;cursor:pointer;color:var(--accent);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="openClientDive('${c.name.replace(/'/g, "\\'")}')">${c.name}</span>${expandBtn}</td>
       <td><span class="badge badge-blue">${c.bu}</span></td>
       <td style="font-family:var(--mono);font-weight:500;text-align:right">${fmtNum(rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right">${fmtNum(booked)} Cr</td>
@@ -1708,7 +1919,319 @@ function renderClients(md) {
       </table>
     </div>`;
 }
+// ── New Client Cohort Health ──────────────────────
+function renderCohort() {
+  const panel = document.getElementById('cohort-panel');
+  if (!panel || !DATA || !CURRENT_MONTH) return;
 
+  // Cohort month = 12 months ago
+  const cohortMKey = (() => {
+    let y = parseInt(CURRENT_MONTH.slice(0,4));
+    let m = parseInt(CURRENT_MONTH.slice(5,7)) - 12;
+    while (m < 1) { m += 12; y--; }
+    return y + '-' + String(m).padStart(2,'0');
+  })();
+
+  const cohortMd  = DATA.months[cohortMKey];
+  const currentMd = DATA.months[CURRENT_MONTH];
+
+  if (!cohortMd || !currentMd) {
+    panel.innerHTML = '<div style="padding:20px 18px;color:var(--ink-soft);font-size:13px">Not enough historical data to build a 12-month cohort.</div>';
+    return;
+  }
+
+  // ── Find clients who were NEW in cohort month ─────
+  // "New" = appeared in cohortMKey but NOT in any earlier month
+  const priorToCohorKeys = DATA.available_months.filter(k => k < cohortMKey);
+  const priorNames = new Set();
+  priorToCohorKeys.forEach(k => {
+    (DATA.months[k]?.top_clients || []).forEach(c => priorNames.add(c.name));
+  });
+
+  const cohortClients = (cohortMd.top_clients || []).filter(c => !priorNames.has(c.name));
+
+  if (!cohortClients.length) {
+    panel.innerHTML = '<div style="padding:20px 18px;color:var(--ink-soft);font-size:13px">No new clients found in the cohort month (' + (cohortMd.label || cohortMKey) + ').</div>';
+    return;
+  }
+
+  // ── Check current status of each cohort client ────
+  const currentNames = new Map((currentMd.top_clients || []).map(c => [c.name, c]));
+
+  const cohortRows = cohortClients.map(c => {
+    const currentClient = currentNames.get(c.name);
+    const currentRev    = currentClient ? r2(currentClient.del_rev || 0) : 0;
+    const firstRev      = r2(c.del_rev || 0);
+    const retained      = currentRev > 0;
+    const grew          = retained && currentRev > firstRev;
+    const growthPct     = retained && firstRev > 0
+      ? r2(((currentRev - firstRev) / firstRev) * 100) : null;
+
+    return {
+      name:       c.name,
+      bu:         c.bu || '—',
+      category:   c.category || '—',
+      agency:     c.agency   || '—',
+      firstRev,
+      currentRev,
+      retained,
+      grew,
+      growthPct,
+    };
+  }).sort((a, b) => b.firstRev - a.firstRev);
+
+  // ── Summary numbers ───────────────────────────────
+  const total    = cohortRows.length;
+  const retained = cohortRows.filter(c => c.retained).length;
+  const grew     = cohortRows.filter(c => c.grew).length;
+  const churned  = total - retained;
+  const retRate  = total > 0 ? Math.round((retained / total) * 100) : 0;
+  const growRate  = retained > 0 ? Math.round((grew / retained) * 100) : 0;
+
+  // ── Funnel bar ────────────────────────────────────
+  const funnelHtml = `
+    <div style="display:flex;align-items:center;gap:0;height:10px;border-radius:6px;overflow:hidden;margin-top:10px;width:100%">
+      <div style="flex:${grew};background:#10B981;transition:flex 0.4s"></div>
+      <div style="flex:${retained - grew};background:#3B82F6;transition:flex 0.4s"></div>
+      <div style="flex:${churned};background:#EF4444;opacity:0.35;transition:flex 0.4s"></div>
+    </div>
+    <div style="display:flex;gap:16px;margin-top:8px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:8px;height:8px;border-radius:2px;background:#10B981"></div>Retained & Grew (${grew})</div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:8px;height:8px;border-radius:2px;background:#3B82F6"></div>Retained Flat (${retained - grew})</div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:8px;height:8px;border-radius:2px;background:#EF4444;opacity:0.6"></div>Churned (${churned})</div>
+    </div>`;
+
+  // ── Summary card ──────────────────────────────────
+  const summaryHtml = `
+    <div style="display:flex;gap:12px;padding:16px 18px 12px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:120px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-bottom:4px">Cohort Month</div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink)">${cohortMd.label || cohortMKey}</div>
+        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${total} new clients</div>
+      </div>
+      <div style="flex:1;min-width:120px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-bottom:4px">Retention Rate</div>
+        <div style="font-size:28px;font-weight:600;color:${retRate >= 60 ? 'var(--green)' : retRate >= 40 ? 'var(--amber)' : 'var(--red)'}">${retRate}%</div>
+        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${retained} of ${total} still active</div>
+      </div>
+      <div style="flex:1;min-width:120px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-bottom:4px">Growth Rate</div>
+        <div style="font-size:28px;font-weight:600;color:${growRate >= 50 ? 'var(--green)' : 'var(--amber)'}">${growRate}%</div>
+        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${grew} of ${retained} retained grew spend</div>
+      </div>
+      <div style="flex:2;min-width:200px;padding-top:4px">
+        ${funnelHtml}
+      </div>
+    </div>`;
+
+  // ── Table ─────────────────────────────────────────
+  const headers = [
+    { label: '#',            w: '28px'  },
+    { label: 'Client'                   },
+    { label: 'BU',           w: '60px'  },
+    { label: 'Category'                 },
+    { label: 'First Rev',    right: true, w: '84px' },
+    { label: 'Now Rev',      right: true, w: '84px' },
+    { label: 'Growth',       right: true, w: '80px' },
+    { label: 'Status',       w: '130px' },
+  ];
+
+  const ths = headers.map(h =>
+    `<th style="text-align:${h.right ? 'right' : 'left'};min-width:${h.w || 'auto'}">${h.label}</th>`
+  ).join('');
+
+  const rows = cohortRows.map((c, i) => {
+    const buCls = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
+
+    let statusBadge;
+    if (!c.retained) {
+      statusBadge = `<span style="font-size:11px;font-weight:500;color:var(--red);background:var(--red-soft);padding:2px 8px;border-radius:10px">● Churned</span>`;
+    } else if (c.grew) {
+      statusBadge = `<span style="font-size:11px;font-weight:500;color:var(--green);background:var(--green-soft);padding:2px 8px;border-radius:10px">↑ Retained & Grew</span>`;
+    } else {
+      statusBadge = `<span style="font-size:11px;font-weight:500;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:10px">→ Retained Flat</span>`;
+    }
+
+    const nowCell = c.retained
+      ? `<span style="font-family:var(--mono);font-weight:500">${fmtNum(c.currentRev)} Cr</span>`
+      : `<span style="color:var(--ink-faint)">—</span>`;
+
+    const growthCell = c.growthPct !== null
+      ? growthBadge(c.growthPct)
+      : `<span style="color:var(--ink-faint)">—</span>`;
+
+    return `<tr>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i + 1}</td>
+      <td style="font-weight:500">${c.name}</td>
+      <td><span class="badge ${buCls}">${c.bu}</span></td>
+      <td style="font-size:12px;color:var(--ink-soft)">${c.category}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(c.firstRev)} Cr</td>
+      <td style="text-align:right">${nowCell}</td>
+      <td style="text-align:right">${growthCell}</td>
+      <td>${statusBadge}</td>
+    </tr>`;
+  }).join('');
+
+  panel.innerHTML = summaryHtml + `
+    <div style="overflow-x:auto">
+      <table class="ptable">
+        <thead><tr>${ths}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+// ── Churner Watch ─────────────────────────────────
+function renderChurners() {
+  const panel = document.getElementById('churner-panel');
+  if (!panel || !DATA || !CURRENT_MONTH) return;
+
+  const md = DATA.months[CURRENT_MONTH];
+  if (!md) return;
+
+  // All client names active this month
+  const currentNames = new Set((md.top_clients || []).map(c => c.name));
+
+  // Walk every past month and build churner profile map
+  const churnerMap = {};
+
+  DATA.available_months.forEach(mkey => {
+    if (mkey >= CURRENT_MONTH) return;
+    const mdata = DATA.months[mkey];
+    if (!mdata) return;
+
+    (mdata.top_clients || []).forEach(c => {
+      if (currentNames.has(c.name)) return; // still active
+
+      // Dominant platform in this month for this client
+      const ctvRev    = c.ctv_rev       || 0;
+      const mobRev    = c.mobile_rev    || 0;
+      const mctvRev   = c.mobilectv_rev || 0;
+      const platPeak  = Math.max(ctvRev, mobRev, mctvRev);
+      const platLabel = platPeak === 0 ? '—'
+        : platPeak === ctvRev    ? 'CTV'
+        : platPeak === mobRev    ? 'Mobile'
+        : 'Mobile+CTV';
+
+      if (!churnerMap[c.name]) {
+        churnerMap[c.name] = {
+          name:      c.name,
+          bu:        c.bu,
+          category:  c.category || '—',
+          agency:    c.agency   || '—',
+          lastMonth: mkey,
+          lastRev:   c.del_rev,
+          lastPlat:  platLabel,
+          peakRev:   c.del_rev,
+          peakMonth: mkey,
+        };
+      } else {
+        if (mkey > churnerMap[c.name].lastMonth) {
+          churnerMap[c.name].lastMonth = mkey;
+          churnerMap[c.name].lastRev   = c.del_rev;
+          churnerMap[c.name].lastPlat  = platLabel;
+        }
+        if (c.del_rev > churnerMap[c.name].peakRev) {
+          churnerMap[c.name].peakRev   = c.del_rev;
+          churnerMap[c.name].peakMonth = mkey;
+        }
+      }
+    });
+  });
+
+  // Filter to last 12 months only, sort by peak revenue
+  const churners = Object.values(churnerMap)
+    .filter(c => {
+      const gone = monthDiff(c.lastMonth, CURRENT_MONTH);
+      if (gone < 1 || gone > 12) return false;
+      if (CURRENT_BU !== 'all' && CURRENT_BU !== 'Others') {
+        if (c.bu !== CURRENT_BU) return false;
+      }
+      if (CURRENT_BU === 'Others') {
+        if (MAIN_BUS.includes(c.bu)) return false;
+      }
+      if (CURRENT_CATEGORY !== 'all' && c.category !== CURRENT_CATEGORY) return false;
+      if (CURRENT_AGENCY   !== 'all' && c.agency   !== CURRENT_AGENCY)   return false;
+      return true;
+    })
+    .sort((a, b) => b.peakRev - a.peakRev)
+    .slice(0, 20);
+
+  if (!churners.length) {
+    panel.innerHTML = '<div style="padding:24px 18px;color:var(--ink-soft);font-size:13px">No churned clients found in the last 12 months.</div>';
+    return;
+  }
+
+  const headers = [
+    { label: '#',            w: '28px'  },
+    { label: 'Client'                   },
+    { label: 'BU',           w: '60px'  },
+    { label: 'Category'                 },
+    { label: 'Agency'                   },
+    { label: 'Last active',  right: true, w: '100px' },
+    { label: 'Months gone',  right: true, w: '90px'  },
+    { label: 'Last platform',            w: '110px'  },
+    { label: 'Peak Rev',     right: true, w: '84px'  },
+    { label: 'Peak month',   right: true, w: '96px'  },
+  ];
+
+  const ths = headers.map(h =>
+    `<th style="text-align:${h.right ? 'right' : 'left'};min-width:${h.w || 'auto'}">${h.label}</th>`
+  ).join('');
+
+  const rows = churners.map((c, i) => {
+    const gone = monthDiff(c.lastMonth, CURRENT_MONTH);
+
+    // Urgency signal
+    let urgencyColor, urgencyLabel;
+    if (gone <= 2) {
+      urgencyColor = 'var(--red)';
+      urgencyLabel = gone === 1 ? '1 month' : '2 months';
+    } else if (gone <= 6) {
+      urgencyColor = 'var(--amber)';
+      urgencyLabel = gone + ' months';
+    } else {
+      urgencyColor = 'var(--ink-faint)';
+      urgencyLabel = gone + ' months';
+    }
+
+    // Friendly month label
+    const lastLabel  = DATA.months[c.lastMonth]  ? DATA.months[c.lastMonth].label  : c.lastMonth;
+    const peakLabel  = DATA.months[c.peakMonth]  ? DATA.months[c.peakMonth].label  : c.peakMonth;
+    const buCls      = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
+
+    const platCls = c.lastPlat === 'CTV' ? 'badge-green'
+      : c.lastPlat === 'Mobile'          ? 'badge-blue'
+      : c.lastPlat === 'Mobile+CTV'      ? 'badge-amber'
+      : 'badge-gray';
+
+    return `<tr>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i + 1}</td>
+      <td style="font-weight:500">${c.name}</td>
+      <td><span class="badge ${buCls}">${c.bu}</span></td>
+      <td style="font-size:12px;color:var(--ink-soft)">${c.category}</td>
+      <td style="font-size:12px;color:var(--ink-soft)">${c.agency}</td>
+      <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${lastLabel}</td>
+      <td style="text-align:right">
+        <span style="font-size:12px;font-weight:500;color:${urgencyColor}">${urgencyLabel}</span>
+      </td>
+      <td><span class="badge ${platCls}">${c.lastPlat}</span></td>
+      <td style="text-align:right;font-family:var(--mono);font-weight:500;color:var(--ink)">${fmtNum(c.peakRev)} Cr</td>
+      <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${peakLabel}</td>
+    </tr>`;
+  }).join('');
+
+  panel.innerHTML = `<div style="overflow-x:auto"><table class="ptable">
+    <thead><tr>${ths}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+// ── Month difference helper ────────────────────────
+function monthDiff(from, to) {
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
 // Toggle brand rows
 function toggleBrands(idx, btn) {
   const brandRows = document.querySelectorAll(`#brands-${idx}`);
@@ -1716,6 +2239,190 @@ function toggleBrands(idx, btn) {
   brandRows.forEach(r => r.style.display = isHidden ? 'table-row' : 'none');
   btn.textContent = isHidden ? '−' : '+';
 }
+// ── Client Deep-Dive ──────────────────────────────
+function openClientDive(clientName) {
+  if (!DATA || !CURRENT_MONTH) return;
+
+  // ── Gather 27-month history for this client ───────
+  const history = [];
+  DATA.available_months.forEach(mkey => {
+    const mdata = DATA.months[mkey];
+    if (!mdata) return;
+    const client = (mdata.top_clients || []).find(c => c.name === clientName);
+    history.push({
+      mkey,
+      label:      mdata.label || mkey,
+      del_rev:    client ? r2(client.del_rev    || 0) : 0,
+      ctv_rev:    client ? r2(client.ctv_rev    || 0) : 0,
+      mobile_rev: client ? r2(client.mobile_rev || 0) : 0,
+      video_rev:  client ? r2(client.video_rev  || 0) : 0,
+      display_rev:client ? r2(client.display_rev|| 0) : 0,
+      booked_rev: client ? r2((client.booked_rev|| 0) / 10000000) : 0,
+      bu:         client ? client.bu       : '—',
+      category:   client ? client.category : '—',
+      agency:     client ? client.agency   : '—',
+    });
+  });
+
+  const currentEntry  = history.find(h => h.mkey === CURRENT_MONTH) || {};
+  const activeMonths  = history.filter(h => h.del_rev > 0);
+  const peakEntry     = activeMonths.reduce((best, h) => h.del_rev > (best.del_rev || 0) ? h : best, {});
+  const firstEntry    = activeMonths[0] || {};
+  const avgRev        = activeMonths.length
+    ? r2(activeMonths.reduce((t, h) => t + h.del_rev, 0) / activeMonths.length)
+    : 0;
+  const totalRev      = r2(activeMonths.reduce((t, h) => t + h.del_rev, 0));
+
+  // ── Populate header ───────────────────────────────
+  document.getElementById('dive-name').textContent = clientName;
+  const buCls = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[currentEntry.bu] || 'badge-gray';
+  document.getElementById('dive-meta').innerHTML =
+    `<span class="badge ${buCls}" style="margin-right:6px">${currentEntry.bu || '—'}</span>` +
+    `<span style="margin-right:6px">${currentEntry.category || '—'}</span>` +
+    (currentEntry.agency && currentEntry.agency !== '—' ? `<span style="color:var(--ink-faint)">·</span> <span style="margin-left:6px">${currentEntry.agency}</span>` : '');
+
+  // ── Sparkline ─────────────────────────────────────
+  const currentIdx  = history.findIndex(h => h.mkey === CURRENT_MONTH);
+  const pointColors = history.map((h, i) =>
+    i === currentIdx ? '#3B82F6' : h.del_rev > 0 ? 'rgba(59,130,246,0.5)' : 'rgba(203,213,225,0.3)'
+  );
+  const pointSizes  = history.map((h, i) => i === currentIdx ? 5 : h.del_rev > 0 ? 3 : 0);
+
+  if (diveChart) diveChart.destroy();
+  const ctx = document.getElementById('dive-chart')?.getContext('2d');
+  if (ctx) {
+    diveChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels:   history.map(h => h.label),
+        datasets: [{
+          data:                history.map(h => h.del_rev),
+          borderColor:         'rgba(59,130,246,0.8)',
+          backgroundColor:     'rgba(59,130,246,0.06)',
+          borderWidth:         2,
+          pointBackgroundColor: pointColors,
+          pointRadius:         pointSizes,
+          tension:             0.3,
+          fill:                true,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => fmtNum(ctx.raw) + ' Cr' }
+        }},
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 45, maxTicksLimit: 10 } },
+          y: { grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, callback: v => v + ' Cr' } }
+        }
+      }
+    });
+  }
+
+  // ── Stats row ─────────────────────────────────────
+  document.getElementById('dive-stats').innerHTML = [
+    { label: 'This Month',     val: fmtNum(currentEntry.del_rev || 0) + ' Cr', sub: 'Delivered revenue' },
+    { label: 'Peak Month',     val: fmtNum(peakEntry.del_rev || 0) + ' Cr',   sub: peakEntry.label || '—' },
+    { label: 'Avg Monthly',    val: fmtNum(avgRev) + ' Cr',                    sub: activeMonths.length + ' active months' },
+    { label: 'First Appeared', val: firstEntry.label || '—',                   sub: 'Earliest month on record' },
+  ].map(s => `
+    <div class="dive-stat">
+      <div class="dive-stat-label">${s.label}</div>
+      <div class="dive-stat-val">${s.val}</div>
+      <div class="dive-stat-sub">${s.sub}</div>
+    </div>`
+  ).join('');
+
+  // ── Revenue mix bars ──────────────────────────────
+  const totalPlatRev = (currentEntry.ctv_rev || 0) + (currentEntry.mobile_rev || 0);
+  const totalAdRev   = (currentEntry.video_rev || 0) + (currentEntry.display_rev || 0);
+  const mixItems = [
+    { label: 'CTV',     val: currentEntry.ctv_rev    || 0, total: totalPlatRev || 1, color: '#10B981' },
+    { label: 'Mobile',  val: currentEntry.mobile_rev || 0, total: totalPlatRev || 1, color: '#3B82F6' },
+    { label: 'Video',   val: currentEntry.video_rev  || 0, total: totalAdRev   || 1, color: '#8B5CF6' },
+    { label: 'Display', val: currentEntry.display_rev|| 0, total: totalAdRev   || 1, color: '#F59E0B' },
+  ];
+  document.getElementById('dive-mix').innerHTML = mixItems.map(m => {
+    const pct = m.total > 0 ? Math.round((m.val / m.total) * 100) : 0;
+    return `<div class="mix-row">
+      <div class="mix-label">${m.label}</div>
+      <div class="mix-bar-bg"><div class="mix-bar-fill" style="width:${pct}%;background:${m.color}"></div></div>
+      <div class="mix-val">${fmtNum(m.val)} Cr</div>
+    </div>`;
+  }).join('');
+
+  // ── Gemini talk points ────────────────────────────
+  const geminiSection = document.getElementById('dive-gemini-section');
+  const geminiContent = document.getElementById('dive-gemini-content');
+
+  if (CONFIG?.GEMINI_API_KEY) {
+    geminiSection.style.display = 'block';
+    geminiContent.innerHTML = '<div style="color:var(--ink-soft);font-size:12px;display:flex;align-items:center;gap:8px"><div style="width:12px;height:12px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite"></div>Generating talk points...</div>';
+
+    const prompt = `You are a senior revenue analyst at JioStar. Based on this client's data, generate exactly 3 concise sales talk points for a call with ${clientName}.
+
+Client data:
+- BU: ${currentEntry.bu}, Category: ${currentEntry.category}, Agency: ${currentEntry.agency || 'Direct'}
+- This month revenue: ${fmtNum(currentEntry.del_rev || 0)} Cr
+- Peak revenue: ${fmtNum(peakEntry.del_rev || 0)} Cr (${peakEntry.label || '—'})
+- Average monthly revenue: ${fmtNum(avgRev)} Cr over ${activeMonths.length} months
+- Platform preference: CTV ${fmtNum(currentEntry.ctv_rev || 0)} Cr, Mobile ${fmtNum(currentEntry.mobile_rev || 0)} Cr
+- Video ${fmtNum(currentEntry.video_rev || 0)} Cr, Display ${fmtNum(currentEntry.display_rev || 0)} Cr
+- First appeared: ${firstEntry.label || '—'}
+
+Return ONLY 3 talk points as plain text, one per line, starting with a bullet •. No preamble. No headers. Each point max 25 words. Focus on upsell angles, platform gaps, or category opportunities.`;
+
+    fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/' + CONFIG.GEMINI_MODEL + ':generateContent?key=' + CONFIG.GEMINI_API_KEY,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
+        }),
+      }
+    )
+    .then(r => r.json())
+    .then(data => {
+      const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const points = reply.split('\n').filter(l => l.trim().startsWith('•'));
+      geminiContent.innerHTML = points.map(p =>
+        `<div class="talk-point">${p.trim()}</div>`
+      ).join('') || '<div style="color:var(--ink-soft);font-size:12px">No talk points generated.</div>';
+    })
+    .catch(() => {
+      geminiContent.innerHTML = '<div style="color:var(--ink-soft);font-size:12px">Talk points unavailable.</div>';
+    });
+  } else {
+    geminiSection.style.display = 'none';
+  }
+
+  // ── Open drawer ───────────────────────────────────
+  const overlay = document.getElementById('dive-overlay');
+  const drawer  = document.getElementById('dive-drawer');
+  overlay.style.display = 'block';
+  overlay.classList.add('open');
+  drawer.style.display  = 'flex';
+  drawer.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeClientDive() {
+  const overlay = document.getElementById('dive-overlay');
+  const drawer  = document.getElementById('dive-drawer');
+  overlay.style.display = 'none';
+  overlay.classList.remove('open');
+  drawer.style.display  = 'none';
+  drawer.classList.remove('open');
+  document.body.style.overflow = '';
+  if (diveChart) { diveChart.destroy(); diveChart = null; }
+}
+
+// Close on ESC
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeClientDive();
+});
 
 // ── Query ─────────────────────────────────────────
 function setQuickQuery(t) {
@@ -1876,6 +2583,85 @@ async function submitQuery() {
 updateRecentQueries(question);
   input.value = '';
 }
+async function briefMe() {
+  const btn         = document.getElementById('brief-me-btn');
+  const answerArea  = document.getElementById('query-answer-area');
+  const answerContent = document.getElementById('answer-content');
+
+  btn.disabled    = true;
+  btn.innerHTML   = '<div style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite"></div> Briefing...';
+  answerArea.style.display  = 'block';
+  answerContent.innerHTML   = '<div style="display:flex;align-items:center;gap:10px;color:var(--ink-soft);font-size:13px;padding:8px 0"><div style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;flex-shrink:0"></div> Gemini is writing the brief...</div>';
+
+  const dataContext = buildDataContext();
+  const md          = DATA.months[CURRENT_MONTH];
+  const nextMKey    = nextMonthKey(CURRENT_MONTH);
+  const nextMd      = DATA.months[nextMKey] || null;
+  const nextBooked  = nextMd
+    ? r2(['LCS1','LCS2','MM1','MM2'].reduce((t, bu) => t + (nextMd.bu[bu] ? (nextMd.bu[bu].booked_rev || 0) / 10000000 : 0), 0))
+    : null;
+
+  const briefPrompt = `You are a senior Revenue Intelligence Analyst at JioStar, India's leading digital streaming platform. 
+Write a crisp executive brief for ${md.label} based ONLY on the data provided below.
+
+STRICT OUTPUT FORMAT — use exactly these HTML sections in order, no deviations:
+
+<div class="brief-headline">Write ONE punchy sentence summarising the single most important revenue story this month. Max 20 words.</div>
+
+<div class="brief-section"><span class="brief-label">Overall Performance</span>Write 2–3 sentences covering total delivered revenue, growth vs last month, and growth vs last year. Use exact numbers from the data.</div>
+
+<div class="brief-section"><span class="brief-label">BU Pulse</span>One line per BU (LCS1, LCS2, MM1, MM2). Format: BU name — revenue — vs LM growth. Call out the standout and the laggard.</div>
+
+<div class="brief-section"><span class="brief-label">Winners This Month</span>Top 2 stories of growth — can be a category, agency, or client. Include the exact Cr movement and % change. Frame as momentum.</div>
+
+<div class="brief-section"><span class="brief-label">Watch List</span>Top 2 declines that need attention. Include exact numbers. Frame as risks to address, not failures. Be direct.</div>
+
+<div class="brief-section"><span class="brief-label">Forward Signal</span>${nextBooked !== null ? `Next month has ₹${fmtNum(nextBooked)} Cr in confirmed bookings.` : 'Next month pipeline data unavailable.'} Based on this and seasonal patterns in the data, write 2 sentences on what to expect and what to watch.</div>
+
+RULES:
+- Only use data provided. No assumptions.
+- Use ₹ and Cr notation throughout.
+- Use ↑ for growth, ↓ for decline.
+- No markdown. Only the HTML structure above.
+- Total length: 250–320 words maximum.
+
+DATA:
+${dataContext}`;
+
+  try {
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/' + CONFIG.GEMINI_MODEL + ':generateContent?key=' + CONFIG.GEMINI_API_KEY,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: briefPrompt }] }],
+          generationConfig: { temperature: 0.15, maxOutputTokens: 1500 },
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err?.error?.message || 'HTTP ' + res.status);
+    }
+
+    const data  = await res.json();
+    const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
+
+    answerContent.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:11px;color:var(--ink-soft)">
+        <span>✦ Brief generated for ${md.label}</span>
+      </div>
+      <div class="brief-output">${reply}</div>`;
+
+  } catch(err) {
+    answerContent.innerHTML = `<div style="color:var(--red);font-size:13px">⚠️ Error: ${err.message}</div>`;
+  } finally {
+    btn.disabled  = false;
+    btn.innerHTML = '<span style="font-size:15px">✦</span> Brief Me';
+  }
+}
 
 function clearConversation() {
   CONVERSATION_HISTORY = [];
@@ -1951,6 +2737,118 @@ function copyGeminiAnswer() {
     `<button class="recent-query-btn" onclick="setQuickQuery('${q.replace(/'/g, "\\'")}')" title="${q}">${q}</button>`
   ).join('');
 }
+// ── Meeting Mode ──────────────────────────────────
+let MEETING_SLIDE = 0;
+
+const MEETING_SLIDES = [
+  { title: 'BU Breakdown',        panelId: 'bu-panel'       },
+  { title: 'Platform Split',      panelId: 'platform-panel' },
+  { title: 'Ad Type Breakdown',   panelId: 'adtype-panel'   },
+  { title: 'Category Leaderboard',panelId: 'category-panel' },
+  { title: 'Agency Performance',  panelId: 'agency-panel'   },
+  { title: 'Top Clients',         panelId: 'clients-panel'  },
+  { title: 'Churner Watch',       panelId: 'churner-panel'  },
+];
+
+function enterMeetingMode() {
+  const overlay = document.getElementById('meeting-overlay');
+  overlay.classList.add('active');
+  document.body.style.overflow = 'hidden';
+
+  // Populate KPI strip from existing kpi-row
+  const kpiRow  = document.getElementById('kpi-row');
+  const strip   = document.getElementById('meeting-kpi-strip');
+  if (kpiRow && strip) {
+    strip.innerHTML = '';
+    Array.from(kpiRow.children).forEach(card => {
+      const clone = card.cloneNode(true);
+      clone.classList.add('meeting-kpi-mini');
+      // shrink values
+      const val = clone.querySelector('.kpi-value');
+      if (val) val.style.fontSize = '18px';
+      strip.appendChild(clone);
+    });
+  }
+
+  // Month + meta
+  const md = DATA?.months[CURRENT_MONTH];
+  if (md) {
+    document.getElementById('meeting-month').textContent = md.label;
+    document.getElementById('meeting-meta').textContent =
+      fmtInt(md.total_clients) + ' clients · ' + fmtNum(md.total_del_rev) + ' Cr delivered';
+  }
+
+  // Build dots
+  buildMeetingDots();
+  renderMeetingSlide();
+
+  // Keyboard navigation
+  document.addEventListener('keydown', meetingKeyHandler);
+}
+
+function exitMeetingMode() {
+  const overlay = document.getElementById('meeting-overlay');
+  overlay.classList.remove('active');
+  document.body.style.overflow = '';
+  document.removeEventListener('keydown', meetingKeyHandler);
+}
+
+function meetingKeyHandler(e) {
+  if (e.key === 'Escape')      exitMeetingMode();
+  if (e.key === 'ArrowRight')  meetingNext();
+  if (e.key === 'ArrowLeft')   meetingPrev();
+}
+
+function meetingNext() {
+  MEETING_SLIDE = (MEETING_SLIDE + 1) % MEETING_SLIDES.length;
+  renderMeetingSlide();
+}
+
+function meetingPrev() {
+  MEETING_SLIDE = (MEETING_SLIDE - 1 + MEETING_SLIDES.length) % MEETING_SLIDES.length;
+  renderMeetingSlide();
+}
+
+function buildMeetingDots() {
+  const dotsEl = document.getElementById('meeting-dots');
+  if (!dotsEl) return;
+  dotsEl.innerHTML = MEETING_SLIDES.map((_, i) =>
+    `<div class="meeting-dot${i === MEETING_SLIDE ? ' active' : ''}" onclick="jumpMeetingSlide(${i})"></div>`
+  ).join('');
+}
+
+function jumpMeetingSlide(i) {
+  MEETING_SLIDE = i;
+  renderMeetingSlide();
+}
+
+function renderMeetingSlide() {
+  const slide   = MEETING_SLIDES[MEETING_SLIDE];
+  const content = document.getElementById('meeting-slide-content');
+  const title   = document.getElementById('meeting-slide-title');
+  const counter = document.getElementById('meeting-slide-counter');
+
+  if (!slide || !content) return;
+
+  title.textContent   = slide.title;
+  counter.textContent = `${MEETING_SLIDE + 1} / ${MEETING_SLIDES.length}`;
+
+  // Clone the panel content into the slide
+  const source = document.getElementById(slide.panelId);
+  if (source) {
+    content.innerHTML = '';
+    const clone = source.cloneNode(true);
+    clone.style.background = 'transparent';
+    content.appendChild(clone);
+  } else {
+    content.innerHTML = `<div style="color:rgba(255,255,255,0.4);font-size:14px;padding:24px">No data to display.</div>`;
+  }
+
+  // Update dots
+  document.querySelectorAll('.meeting-dot').forEach((d, i) => {
+    d.classList.toggle('active', i === MEETING_SLIDE);
+  });
+}
 // ── Formatters ────────────────────────────────────
 function fmtNum(n){const v=Number(n)||0; return v>=5?v.toFixed(1):v.toFixed(2);}
 function fmtInt(n){return Math.round(Number(n)||0).toLocaleString('en-IN');}
@@ -1963,6 +2861,12 @@ function priorMonthKey(yyyymm) {
 }
 function lyMonthKey(yyyymm) {
   return (parseInt(yyyymm.slice(0,4)) - 1) + '-' + yyyymm.slice(5,7);
+}
+function nextMonthKey(yyyymm) {
+  let y = parseInt(yyyymm.slice(0,4));
+  let m = parseInt(yyyymm.slice(5,7)) + 1;
+  if (m > 12) { m = 1; y++; }
+  return y + '-' + String(m).padStart(2,'0');
 }
 function formatFieldKey(fmt) {
   const map = {

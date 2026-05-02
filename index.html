@@ -125,8 +125,19 @@
         <h1 class="page-title" id="page-title">Loading...</h1>
         <span class="page-sub" id="page-sub">Revenue Intelligence Platform</span>
       </div>
-      <div class="topbar-right">
+      <div class="topbar-right" style="display:flex;align-items:center;gap:12px">
         <div class="topbar-meta" id="topbar-meta">—</div>
+        <button onclick="enterMeetingMode()" style="
+          display:flex;align-items:center;gap:7px;
+          background:var(--navy);color:#fff;
+          border:none;border-radius:8px;
+          padding:8px 14px;
+          font-family:var(--font);font-size:12px;font-weight:500;
+          cursor:pointer;transition:background 0.15s;
+        ">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          Meeting Mode
+        </button>
       </div>
     </header>
 
@@ -149,6 +160,21 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
       </div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+        <button id="brief-me-btn" onclick="briefMe()" style="
+          display:flex;align-items:center;gap:8px;
+          background:var(--navy);color:#fff;
+          border:none;border-radius:10px;
+          padding:10px 20px;
+          font-family:var(--font);font-size:13px;font-weight:500;
+          cursor:pointer;transition:background 0.15s;flex-shrink:0;
+        ">
+          <span style="font-size:15px">✦</span> Brief Me
+        </button>
+        <span style="font-size:12px;color:var(--ink-soft)">One-click narrative of the full month — ready to share</span>
+      </div>
+
       <div class="query-answer-area" id="query-answer-area" style="display:none;">
         <div class="answer-label">
           <span class="answer-dot"></span>
@@ -170,6 +196,24 @@
     <canvas id="platform-chart" height="200"></canvas>
   </div>
 </div>
+    <div style="padding:20px 28px 0">
+      <div class="chart-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div class="chart-title">Category Portfolio Map</div>
+          <div style="font-size:11px;color:var(--ink-soft)">Bubble size = client count &nbsp;·&nbsp; Click a bubble to filter &nbsp;·&nbsp; Click anywhere else to reset</div>
+        </div>
+        <div style="height:360px;position:relative">
+          <canvas id="bubble-chart"></canvas>
+        </div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:12px">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(16,185,129,0.75)"></div>Double Down — big &amp; growing</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(245,158,11,0.75)"></div>Defend — big but declining</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(59,130,246,0.75)"></div>Invest — small but growing</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(100,116,139,0.5)"></div>Deprioritize — small &amp; declining</div>
+        </div>
+      </div>
+    </div>
+
     <div class="panels-grid">
 
       <section class="panel panel-full">
@@ -225,6 +269,27 @@
         </div>
         <div class="panel-body" id="clients-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
       </section>
+      <section class="panel panel-full">
+  <div class="panel-header">
+    <span class="panel-title">New Client Cohort Health</span>
+    <span class="panel-tag">First appeared 12 months ago</span>
+    <button class="panel-export-btn" data-export="cohort-panel" onclick="exportPanel('cohort-panel','Cohort_Health')">⎘ Export</button>
+  </div>
+  <div class="panel-body" id="cohort-panel">
+    <div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div>
+  </div>
+</section>
+
+<section class="panel panel-full">
+  <div class="panel-header">
+    <span class="panel-title">Churner Watch</span>
+    <span class="panel-tag">Active last 12 months · Zero this month</span>
+    <button class="panel-export-btn" data-export="churner-panel" onclick="exportPanel('churner-panel','Churner_Watch')">⎘ Export</button>
+  </div>
+  <div class="panel-body" id="churner-panel">
+    <div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div>
+  </div>
+</section>
 
     </div>  <!-- closing of panels-grid -->
     <section class="flags-row" id="flags-row" style="display:none;"></section>
@@ -232,5 +297,117 @@
 
   <script src="config.js"></script>
   <script src="scripts/ui.js"></script>
+  <!-- Client Deep-Dive Drawer -->
+<div id="dive-overlay" onclick="closeClientDive()" style="
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:200;
+  animation:fadeIn 0.2s ease;
+"></div>
+
+<div id="dive-drawer" style="
+  display:none;position:fixed;top:0;right:0;bottom:0;width:420px;
+  background:#fff;z-index:201;box-shadow:-4px 0 32px rgba(0,0,0,0.12);
+  flex-direction:column;overflow:hidden;
+">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+    <div>
+      <div id="dive-name" style="font-size:16px;font-weight:600;color:var(--ink);letter-spacing:-0.01em"></div>
+      <div id="dive-meta" style="font-size:12px;color:var(--ink-soft);margin-top:3px"></div>
+    </div>
+    <button onclick="closeClientDive()" style="background:none;border:none;font-size:18px;color:var(--ink-soft);cursor:pointer;padding:4px 8px;border-radius:6px;line-height:1">✕</button>
+  </div>
+
+  <div style="flex:1;overflow-y:auto;padding:18px 20px">
+
+    <div style="margin-bottom:20px">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-soft);margin-bottom:10px">Month Wise Revenue History</div>
+      <div style="height:140px;position:relative"><canvas id="dive-chart"></canvas></div>
+    </div>
+
+    <div id="dive-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px"></div>
+
+    <div style="margin-bottom:20px">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-soft);margin-bottom:10px">Revenue Mix</div>
+      <div id="dive-mix"></div>
+    </div>
+
+    <div id="dive-gemini-section" style="display:none">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-soft);margin-bottom:10px">Talk Points for Sales Call</div>
+      <div id="dive-gemini-content" style="font-size:12px;color:var(--ink);line-height:1.7"></div>
+    </div>
+
+  </div>
+</div>
+<!-- Meeting Mode Overlay -->
+<div id="meeting-overlay" style="
+  display:none;position:fixed;inset:0;
+  background:#0D1B2A;z-index:300;
+  flex-direction:column;overflow:hidden;
+">
+  <!-- Top bar -->
+  <div style="
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 32px;border-bottom:1px solid rgba(255,255,255,0.08);
+    flex-shrink:0;
+  ">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="background:var(--accent);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;color:#fff;letter-spacing:0.04em">JS</div>
+      <div>
+        <div id="meeting-month" style="font-size:15px;font-weight:600;color:#fff;letter-spacing:-0.01em"></div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:1px">Revenue Intelligence · JioStar</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:20px">
+      <div id="meeting-meta" style="font-size:12px;color:rgba(255,255,255,0.5);font-family:var(--mono)"></div>
+      <button onclick="exitMeetingMode()" style="
+        background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.7);
+        border:1px solid rgba(255,255,255,0.12);border-radius:7px;
+        padding:7px 14px;font-family:var(--font);font-size:12px;
+        cursor:pointer;display:flex;align-items:center;gap:6px;
+      ">✕ Exit</button>
+    </div>
+  </div>
+
+  <!-- KPI strip — always visible -->
+  <div id="meeting-kpi-strip" style="
+    padding:16px 32px 0;flex-shrink:0;
+    display:grid;grid-template-columns:repeat(8,1fr);gap:10px;
+  "></div>
+
+  <!-- Slide area -->
+  <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding:16px 32px 0">
+
+    <!-- Slide header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-shrink:0">
+      <div id="meeting-slide-title" style="font-size:18px;font-weight:600;color:#fff;letter-spacing:-0.01em"></div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div id="meeting-slide-counter" style="font-size:12px;color:rgba(255,255,255,0.4);font-family:var(--mono)"></div>
+        <button onclick="meetingPrev()" style="
+          background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.12);
+          border-radius:7px;padding:8px 16px;font-size:16px;cursor:pointer;transition:background 0.15s;
+        ">←</button>
+        <button onclick="meetingNext()" style="
+          background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.12);
+          border-radius:7px;padding:8px 16px;font-size:16px;cursor:pointer;transition:background 0.15s;
+        ">→</button>
+      </div>
+    </div>
+
+    <!-- Slide content -->
+    <div id="meeting-slide-content" style="
+      flex:1;overflow-y:auto;
+      background:rgba(255,255,255,0.03);
+      border:1px solid rgba(255,255,255,0.07);
+      border-radius:12px;
+      padding:20px 24px;
+    "></div>
+
+  </div>
+
+  <!-- Bottom dots -->
+  <div id="meeting-dots" style="
+    display:flex;justify-content:center;align-items:center;gap:8px;
+    padding:14px 0;flex-shrink:0;
+  "></div>
+</div>
 </body>
 </html>
