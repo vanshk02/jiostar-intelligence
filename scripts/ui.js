@@ -1882,6 +1882,15 @@ function renderClients(md) {
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.ctv_rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.mobile_rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.mobilectv_rev)} Cr</td>
+      <td>${(() => {
+        const h = clientHealthScore(c.name, rev);
+        return `<span title="${h.label} — based on 3-month trend, vs last year, and repeat status"
+          style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;
+          color:${h.color};background:${h.color}18;padding:2px 8px;border-radius:10px;cursor:default">
+          <span style="width:6px;height:6px;border-radius:50%;background:${h.color};flex-shrink:0"></span>
+          ${h.label}
+        </span>`;
+      })()}</td>
       <td style="text-align:right;color:var(--ink-soft);font-size:12px">${share}%</td>
     </tr>${brandRows}`;
   }).join('');
@@ -1906,18 +1915,77 @@ function renderClients(md) {
           <th style="text-align:right;min-width:76px">${revLabel}</th>
           <th style="text-align:right;min-width:76px">Booked</th>
           <th>Category</th>
-<th>vs LY</th>
+          <th>vs LY</th>
           <th>Agency</th>
           <th style="text-align:right;min-width:68px">Video</th>
           <th style="text-align:right;min-width:68px">Display</th>
           <th style="text-align:right;min-width:68px">CTV</th>
           <th style="text-align:right;min-width:68px">Mobile</th>
           <th style="text-align:right;min-width:68px">Mob+CTV</th>
+          <th style="min-width:60px">Health</th>
           <th style="text-align:right;min-width:52px">Share</th>
         </tr></thead>
         <tbody>${rowsHtml}${totalRow}</tbody>
       </table>
     </div>`;
+}
+// ── Client Health Score ───────────────────────────
+function clientHealthScore(clientName, currentRev) {
+  const priorMd  = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const prior2Md = DATA.months[priorMonthKey(priorMonthKey(CURRENT_MONTH))] || null;
+  const lyMd     = DATA.months[lyMonthKey(CURRENT_MONTH)] || null;
+
+  const findRev = (md) => {
+    if (!md) return null;
+    const c = (md.top_clients || []).find(x => x.name === clientName);
+    return c ? r2(c.del_rev || 0) : null;
+  };
+
+  const priorRev  = findRev(priorMd);
+  const prior2Rev = findRev(prior2Md);
+  const lyRev     = findRev(lyMd);
+
+  let score = 0;
+
+  // ── Signal 1: 3-month revenue trend (weight 40) ──
+  if (priorRev !== null && prior2Rev !== null) {
+    if (currentRev > priorRev && priorRev > prior2Rev)       score += 40; // growing
+    else if (currentRev > priorRev || priorRev >= prior2Rev) score += 20; // mixed
+    else                                                      score += 0;  // declining
+  } else if (priorRev !== null) {
+    score += currentRev >= priorRev ? 30 : 10;
+  } else {
+    score += 20; // no prior data — neutral
+  }
+
+  // ── Signal 2: vs last year (weight 30) ───────────
+  if (lyRev !== null && lyRev > 0) {
+    const lyPct = ((currentRev - lyRev) / lyRev) * 100;
+    if (lyPct >= 10)       score += 30;
+    else if (lyPct >= -10) score += 15;
+    else                   score += 0;
+  } else {
+    score += 15; // no LY data — neutral
+  }
+
+  // ── Signal 3: repeat vs new (weight 20) ──────────
+  if (lyRev !== null && lyRev > 0) score += 20; // was active last year = repeat
+  else                              score += 10; // new client — neutral not penalised
+
+  // ── Signal 4: prior month momentum (weight 10) ───
+  if (priorRev !== null && priorRev > 0) {
+    const mom = ((currentRev - priorRev) / priorRev) * 100;
+    if (mom >= 0) score += 10;
+    else          score += 0;
+  } else {
+    score += 5;
+  }
+
+  // ── Map score to status ───────────────────────────
+  // Max possible = 100
+  if (score >= 70) return { status: 'healthy', color: '#10B981', label: 'Healthy',  dot: '🟢' };
+  if (score >= 40) return { status: 'watch',   color: '#F59E0B', label: 'Watch',    dot: '🟡' };
+  return             { status: 'risk',    color: '#EF4444', label: 'At Risk',  dot: '🔴' };
 }
 // ── New Client Cohort Health ──────────────────────
 function renderCohort() {
