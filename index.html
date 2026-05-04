@@ -12,6 +12,8 @@
 </head>
 <body>
 
+  
+
   <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="sidebar-brand">
@@ -21,6 +23,19 @@
         <span class="brand-sub">Revenue Intelligence</span>
       </div>
     </div>
+
+    <div class="sidebar-section-label">Quick Views</div>
+    <div style="padding:0 12px 10px;display:flex;flex-wrap:wrap;gap:5px">
+      <button class="preset-btn" onclick="applyPreset('bu','LCS1')">LCS1</button>
+      <button class="preset-btn" onclick="applyPreset('bu','LCS2')">LCS2</button>
+      <button class="preset-btn" onclick="applyPreset('bu','MM1')">MM1</button>
+      <button class="preset-btn" onclick="applyPreset('bu','MM2')">MM2</button>
+      <button class="preset-btn" onclick="applyPreset('platform','CTV')">CTV</button>
+      <button class="preset-btn" onclick="applyPreset('platform','Mobile')">Mobile</button>
+      <button class="preset-btn" onclick="applyPreset('adtype','Video')">Video</button>
+      <button class="preset-btn" onclick="applyPreset('adtype','Display')">Display</button>
+    </div>
+    <div class="sidebar-divider"></div>
 
     <div class="sidebar-section-label">Filters</div>
 
@@ -141,6 +156,12 @@
       </div>
     </header>
 
+    <div id="pill-bar" style="display:none;background:var(--surface-2);border-bottom:1px solid var(--border);padding:6px 28px;align-items:center;gap:8px;flex-wrap:wrap;position:sticky;top:var(--topbar-h);z-index:49">
+      <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);margin-right:4px">Filtered by</span>
+      <div id="pill-list" style="display:flex;gap:6px;flex-wrap:wrap;flex:1"></div>
+      <button onclick="clearAllFilters()" style="font-size:11px;color:var(--ink-soft);background:none;border:none;cursor:pointer;text-decoration:underline;text-underline-offset:2px;margin-left:auto;flex-shrink:0">Clear all</button>
+    </div>
+
     <section class="kpi-row" id="kpi-row">
       <div class="kpi-card skeleton"></div>
       <div class="kpi-card skeleton"></div>
@@ -186,113 +207,191 @@
         <div class="answer-content" id="answer-content"></div>
       </div>
     </section>
-<div class="charts-row">
-  <div class="chart-card">
-    <div class="chart-title">BU Revenue — Current vs Last Year</div>
-    <canvas id="bu-chart" height="200"></canvas>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title">Platform Split</div>
-    <canvas id="platform-chart" height="200"></canvas>
-  </div>
-</div>
-    <div style="padding:20px 28px 0">
-      <div class="chart-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div class="chart-title">Category Portfolio Map</div>
-          <div style="font-size:11px;color:var(--ink-soft)">Bubble size = client count &nbsp;·&nbsp; Click a bubble to filter &nbsp;·&nbsp; Click anywhere else to reset</div>
-        </div>
-        <div style="height:360px;position:relative">
-          <canvas id="bubble-chart"></canvas>
-        </div>
-        <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:12px">
-          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(16,185,129,0.75)"></div>Double Down — big &amp; growing</div>
-          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(245,158,11,0.75)"></div>Defend — big but declining</div>
-          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(59,130,246,0.75)"></div>Invest — small but growing</div>
-          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(100,116,139,0.5)"></div>Deprioritize — small &amp; declining</div>
-        </div>
-      </div>
+<!-- Flags moved up — auto diagnostics -->
+    <section class="flags-row" id="flags-row" style="display:none;padding:0 28px 12px;"></section>
+
+    <!-- Section Nav -->
+    <div id="section-nav" style="
+      background:#fff;border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+      padding:0 28px;display:flex;gap:0;position:sticky;top:var(--topbar-h);z-index:48;
+    ">
+      <button class="snav-btn active" onclick="jumpToSection('sec-revenue',this)">Revenue split</button>
+      <button class="snav-btn" onclick="jumpToSection('sec-categories',this)">Categories</button>
+      <button class="snav-btn" onclick="jumpToSection('sec-clients',this)">Clients</button>
+      <button class="snav-btn" onclick="jumpToSection('sec-watchlist',this)">Watch list</button>
     </div>
 
-    <div class="panels-grid">
+    <!-- Sections -->
+    <div style="padding:20px 28px 40px;display:flex;flex-direction:column;gap:12px">
 
-      <section class="panel panel-full">
-        <div class="panel-header">
-          <span class="panel-title">BU Breakdown</span>
-          <span class="panel-tag">Delivered Revenue · Cr</span>
-          <button class="panel-export-btn" data-export="bu-panel" onclick="exportPanel('bu-panel','BU_Breakdown')">⎘ Export</button>
+      <!-- Section 1: Revenue Split -->
+      <div class="sec-block" id="sec-revenue">
+        <div class="sec-hdr" onclick="toggleSec('sec-revenue')">
+          <div class="sec-icon" style="background:rgba(59,130,246,0.1)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <div class="sec-info">
+            <div class="sec-title">Revenue split</div>
+            <div class="sec-sub">Where did the money come from? BU, platform, and ad type breakdown</div>
+          </div>
+          <div class="sec-badges" id="badges-revenue"></div>
+          <div class="sec-chevron" id="chev-sec-revenue">▾</div>
         </div>
-        <div class="panel-body" id="bu-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
-      </section>
-
-      <section class="panel panel-full">
-    <div class="panel-header">
-        <span class="panel-title">Platform Split</span>
-          <span class="panel-tag">Del Rev · Cr</span>
-          <button class="panel-export-btn" data-export="platform-panel" onclick="exportPanel('platform-panel','Platform_Split')">⎘ Export</button>
+        <div class="sec-body open" id="body-sec-revenue">
+          <!-- Charts row inside section -->
+          <div class="charts-row" style="padding:16px 20px 0">
+            <div class="chart-card">
+              <div class="chart-title">BU Revenue — Current vs Last Year</div>
+              <canvas id="bu-chart" height="200"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Platform Split</div>
+              <canvas id="platform-chart" height="200"></canvas>
+            </div>
+          </div>
+          <div style="padding:12px 20px 4px;display:flex;flex-direction:column;gap:10px">
+            <div class="inner-panel">
+              <div class="inner-panel-hdr">
+                <span class="panel-title">BU Breakdown</span>
+                <span class="panel-tag">Delivered revenue · Cr</span>
+                <button class="panel-export-btn" data-export="bu-panel" onclick="exportPanel('bu-panel','BU_Breakdown')">⎘ Export</button>
+              </div>
+              <div class="panel-body" id="bu-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+            </div>
+            <div class="inner-panel">
+              <div class="inner-panel-hdr">
+                <span class="panel-title">Platform Split</span>
+                <span class="panel-tag">CTV vs Mobile vs Mobile+CTV</span>
+                <button class="panel-export-btn" data-export="platform-panel" onclick="exportPanel('platform-panel','Platform_Split')">⎘ Export</button>
+              </div>
+              <div class="panel-body" id="platform-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+            </div>
+            <div class="inner-panel">
+              <div class="inner-panel-hdr">
+                <span class="panel-title">Ad Type</span>
+                <span class="panel-tag">Video vs Display — where the format mix sits</span>
+                <button class="panel-export-btn" data-export="adtype-panel" onclick="exportPanel('adtype-panel','Ad_Type')">⎘ Export</button>
+              </div>
+              <div class="panel-body" id="adtype-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+            </div>
+          </div>
         </div>
-        <div class="panel-body" id="platform-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
-      </section>
+      </div>
 
-      <section class="panel panel-full">
-  <div class="panel-header">
-    <span class="panel-title">Ad Type</span>
-          <span class="panel-tag">Video vs Display</span>
-          <button class="panel-export-btn" data-export="adtype-panel" onclick="exportPanel('adtype-panel','Ad_Type')">⎘ Export</button>
+      <!-- Section 2: Categories -->
+      <div class="sec-block" id="sec-categories">
+        <div class="sec-hdr" onclick="toggleSec('sec-categories')">
+          <div class="sec-icon" style="background:rgba(16,185,129,0.1)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+          </div>
+          <div class="sec-info">
+            <div class="sec-title">Categories</div>
+            <div class="sec-sub">Which categories are growing, which need attention — and the portfolio map</div>
+          </div>
+          <div class="sec-badges" id="badges-categories"></div>
+          <div class="sec-chevron" id="chev-sec-categories">▾</div>
         </div>
-        <div class="panel-body" id="adtype-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
-      </section>
-
-      <section class="panel panel-full">
-        <div class="panel-header">
-          <span class="panel-title">Category Leaderboard</span>
-          <span class="panel-tag">Top 10 · Del Rev</span>
-          <button class="panel-export-btn" data-export="category-panel" onclick="exportPanel('category-panel','Category_Leaderboard')">⎘ Export</button>
+        <div class="sec-body" id="body-sec-categories">
+          <div style="padding:16px 20px 0">
+            <div class="chart-card">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                <div class="chart-title">Category Portfolio Map</div>
+                <div style="font-size:11px;color:var(--ink-soft)">Bubble size = client count · Click to filter · Click empty area to reset</div>
+              </div>
+              <div style="height:360px;position:relative"><canvas id="bubble-chart"></canvas></div>
+              <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:12px">
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(16,185,129,0.75)"></div>Double Down</div>
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(245,158,11,0.75)"></div>Defend</div>
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(59,130,246,0.75)"></div>Invest</div>
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:10px;height:10px;border-radius:50%;background:rgba(100,116,139,0.5)"></div>Deprioritize</div>
+              </div>
+            </div>
+          </div>
+          <div style="padding:12px 20px 4px;display:flex;flex-direction:column;gap:10px">
+            <div class="inner-panel">
+              <div class="inner-panel-hdr">
+                <span class="panel-title">Category Leaderboard</span>
+                <span class="panel-tag">Ranked by delivered revenue — spot the movers</span>
+                <button class="panel-export-btn" data-export="category-panel" onclick="exportPanel('category-panel','Category_Leaderboard')">⎘ Export</button>
+              </div>
+              <div class="panel-body" id="category-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+            </div>
+            <div class="inner-panel">
+              <div class="inner-panel-hdr">
+                <span class="panel-title">Agency Performance</span>
+                <span class="panel-tag">Which agencies are driving growth this month</span>
+                <button class="panel-export-btn" data-export="agency-panel" onclick="exportPanel('agency-panel','Agency_Performance')">⎘ Export</button>
+              </div>
+              <div class="panel-body" id="agency-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+            </div>
+          </div>
         </div>
-        <div class="panel-body" id="category-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
-      </section>
+      </div>
 
-      <section class="panel panel-full">
-        <div class="panel-header">
-          <span class="panel-title">Agency Performance</span>
-          <span class="panel-tag">Del Rev · Cr</span>
-          <button class="panel-export-btn" data-export="agency-panel" onclick="exportPanel('agency-panel','Agency_Performance')">⎘ Export</button>
+      <!-- Section 3: Clients -->
+      <div class="sec-block" id="sec-clients">
+        <div class="sec-hdr" onclick="toggleSec('sec-clients')">
+          <div class="sec-icon" style="background:rgba(139,92,246,0.1)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <div class="sec-info">
+            <div class="sec-title">Client view</div>
+            <div class="sec-sub">Who drove this month — top 20 clients with health scores, click any name to deep-dive</div>
+          </div>
+          <div class="sec-badges" id="badges-clients"></div>
+          <div class="sec-chevron" id="chev-sec-clients">▾</div>
         </div>
-        <div class="panel-body" id="agency-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div></div>
-      </section>
-
-      <section class="panel panel-full">
-        <div class="panel-header">
-          <span class="panel-title" id="clients-panel-title">Top Clients</span>
-          <span class="panel-tag">By Delivered Revenue</span>
-          <button class="panel-export-btn" data-export="clients-panel" onclick="exportPanel('clients-panel','Top_Clients')">⎘ Export</button>
+        <div class="sec-body" id="body-sec-clients">
+          <div style="padding:12px 20px 4px;display:flex;flex-direction:column;gap:10px">
+            <div class="inner-panel">
+              <div class="inner-panel-hdr">
+                <span class="panel-title" id="clients-panel-title">Top Clients</span>
+                <span class="panel-tag">By delivered revenue — click a name to see full history</span>
+                <button class="panel-export-btn" data-export="clients-panel" onclick="exportPanel('clients-panel','Top_Clients')">⎘ Export</button>
+              </div>
+              <div class="panel-body" id="clients-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+            </div>
+          </div>
         </div>
-        <div class="panel-body" id="clients-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
-      </section>
-      <section class="panel panel-full">
-  <div class="panel-header">
-    <span class="panel-title">New Client Cohort Health</span>
-    <span class="panel-tag">First appeared 12 months ago</span>
-    <button class="panel-export-btn" data-export="cohort-panel" onclick="exportPanel('cohort-panel','Cohort_Health')">⎘ Export</button>
-  </div>
-  <div class="panel-body" id="cohort-panel">
-    <div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div>
-  </div>
-</section>
+      </div>
 
-<section class="panel panel-full">
-  <div class="panel-header">
-    <span class="panel-title">Churner Watch</span>
-    <span class="panel-tag">Active last 12 months · Zero this month</span>
-    <button class="panel-export-btn" data-export="churner-panel" onclick="exportPanel('churner-panel','Churner_Watch')">⎘ Export</button>
-  </div>
-  <div class="panel-body" id="churner-panel">
-    <div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div><div class="loading-row"></div></div>
-  </div>
-</section>
+      <!-- Section 4: Watch List -->
+      <div class="sec-block" id="sec-watchlist">
+        <div class="sec-hdr" onclick="toggleSec('sec-watchlist')">
+          <div class="sec-icon" style="background:rgba(245,158,11,0.1)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <div class="sec-info">
+            <div class="sec-title">Watch list</div>
+            <div class="sec-sub">Clients who went silent and cohort retention — act on these before next review</div>
+          </div>
+          <div class="sec-badges" id="badges-watchlist"></div>
+          <div class="sec-chevron" id="chev-sec-watchlist">▾</div>
+        </div>
+        <div class="sec-body" id="body-sec-watchlist">
+          <div style="padding:12px 20px 4px;display:flex;flex-direction:column;gap:10px">
+            <div class="inner-panel">
+              <div class="inner-panel-hdr">
+                <span class="panel-title">New Client Cohort Health</span>
+                <span class="panel-tag">Of clients new 12 months ago — how many returned and grew?</span>
+                <button class="panel-export-btn" data-export="cohort-panel" onclick="exportPanel('cohort-panel','Cohort_Health')">⎘ Export</button>
+              </div>
+              <div class="panel-body" id="cohort-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+            </div>
+            <div class="inner-panel">
+              <div class="inner-panel-hdr">
+                <span class="panel-title">Churner Watch</span>
+                <span class="panel-tag">Active last 12 months, zero this month — sorted by peak revenue</span>
+                <button class="panel-export-btn" data-export="churner-panel" onclick="exportPanel('churner-panel','Churner_Watch')">⎘ Export</button>
+              </div>
+              <div class="panel-body" id="churner-panel"><div class="loading-rows"><div class="loading-row"></div><div class="loading-row"></div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-    </div>  <!-- closing of panels-grid -->
-    <section class="flags-row" id="flags-row" style="display:none;"></section>
+    </div>
+
   </main>
 
   <script src="config.js"></script>

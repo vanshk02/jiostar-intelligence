@@ -39,6 +39,7 @@ async function loadData() {
     attachListeners();
     document.getElementById('month-select').value = CURRENT_MONTH;
     renderAll();
+    initScrollSpy();
     document.getElementById('freshness-dot').className = 'freshness-dot ready';
     const d = new Date(DATA.generated_at);
     document.getElementById('freshness-label').textContent =
@@ -404,7 +405,7 @@ function renderAll() {
   const md = DATA.months[CURRENT_MONTH]; if (!md) return;
   renderHeader(md); renderKPIs(md); renderCharts(md); renderBubbleMap(md);
   renderBU(md); renderPlatform(md); renderAdType(md);
-  renderCategories(md); renderAgencies(md); renderClients(md); renderCohort(); renderChurners(); renderFlags(md);
+  renderCategories(md); renderAgencies(md); renderClients(md); renderCohort(); renderChurners(); renderFlags(md); renderPillBar(); renderSectionBadges();
 }
 
 // ── Header ────────────────────────────────────────
@@ -2916,6 +2917,240 @@ function renderMeetingSlide() {
   document.querySelectorAll('.meeting-dot').forEach((d, i) => {
     d.classList.toggle('active', i === MEETING_SLIDE);
   });
+}
+// ── Active Filter Pill Bar ────────────────────────
+function renderPillBar() {
+  const bar      = document.getElementById('pill-bar');
+  const pillList = document.getElementById('pill-list');
+  if (!bar || !pillList) return;
+
+  const activeFilters = [
+    { key: 'bu',       val: CURRENT_BU,       label: CURRENT_BU,       setter: () => { CURRENT_BU='all';       document.getElementById('bu-select').value='all'; } },
+    { key: 'platform', val: CURRENT_PLATFORM, label: CURRENT_PLATFORM, setter: () => { CURRENT_PLATFORM='all'; document.getElementById('platform-select').value='all'; } },
+    { key: 'adtype',   val: CURRENT_ADTYPE,   label: CURRENT_ADTYPE,   setter: () => { CURRENT_ADTYPE='all';   document.getElementById('adtype-select').value='all'; } },
+    { key: 'format',   val: CURRENT_FORMAT,   label: CURRENT_FORMAT,   setter: () => { CURRENT_FORMAT='all';   document.getElementById('format-select').value='all'; } },
+    { key: 'category', val: CURRENT_CATEGORY, label: CURRENT_CATEGORY, setter: () => { CURRENT_CATEGORY='all'; document.getElementById('category-select').value='all'; } },
+    { key: 'agency',   val: CURRENT_AGENCY,   label: CURRENT_AGENCY,   setter: () => { CURRENT_AGENCY='all';   document.getElementById('agency-select').value='all'; } },
+  ].filter(f => f.val !== 'all');
+
+  if (!activeFilters.length) {
+    bar.style.display = 'none';
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    return;
+  }
+
+  bar.style.display = 'flex';
+  pillList.innerHTML = activeFilters.map((f, i) =>
+    `<span style="
+      display:inline-flex;align-items:center;gap:5px;
+      font-size:11px;font-weight:500;
+      padding:3px 10px;border-radius:20px;
+      background:var(--accent-soft);color:var(--accent);
+      border:1px solid rgba(59,130,246,0.25);cursor:pointer;
+    " onclick="removePill(${i})">${f.label} <span style="font-size:10px;opacity:.6">×</span></span>`
+  ).join('');
+
+  // Store setters for onclick use
+  window._pillSetters = activeFilters.map(f => f.setter);
+}
+
+function removePill(i) {
+  window._pillSetters[i]();
+  renderAll();
+}
+
+function clearAllFilters() {
+  CURRENT_BU='all'; CURRENT_PLATFORM='all'; CURRENT_ADTYPE='all';
+  CURRENT_FORMAT='all'; CURRENT_CATEGORY='all'; CURRENT_AGENCY='all';
+  ['bu','platform','adtype','format','category','agency'].forEach(id => {
+    document.getElementById(id+'-select').value = 'all';
+  });
+  renderAll();
+}
+function applyPreset(filterType, value) {
+  // If already active — toggle off
+  const isActive =
+    (filterType === 'bu'       && CURRENT_BU       === value) ||
+    (filterType === 'platform' && CURRENT_PLATFORM === value) ||
+    (filterType === 'adtype'   && CURRENT_ADTYPE   === value);
+
+  // Reset all first for clean state
+  CURRENT_BU='all'; CURRENT_PLATFORM='all'; CURRENT_ADTYPE='all';
+  CURRENT_FORMAT='all'; CURRENT_CATEGORY='all'; CURRENT_AGENCY='all';
+  ['bu','platform','adtype','format','category','agency'].forEach(id => {
+    document.getElementById(id+'-select').value = 'all';
+  });
+
+  // Apply the chosen preset (unless toggling off)
+  if (!isActive) {
+    if (filterType === 'bu') {
+      CURRENT_BU = value;
+      document.getElementById('bu-select').value = value;
+    } else if (filterType === 'platform') {
+      CURRENT_PLATFORM = value;
+      document.getElementById('platform-select').value = value;
+    } else if (filterType === 'adtype') {
+      CURRENT_ADTYPE = value;
+      document.getElementById('adtype-select').value = value;
+    }
+  }
+
+  // Update active state on buttons
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  if (!isActive) {
+    event.target.classList.add('active');
+  }
+
+  renderAll();
+}
+// ── Section header badges ─────────────────────────
+function renderSectionBadges() {
+  const md      = DATA?.months[CURRENT_MONTH]; if (!md) return;
+  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+
+  const badge = (text, color) =>
+    `<span class="sec-badge" style="background:${color}18;color:${color};border:1px solid ${color}30">${text}</span>`;
+
+  // ── Revenue Split ─────────────────────────────────
+  const topBU = ['LCS1','LCS2','MM1','MM2']
+    .map(b => ({ name: b, rev: md.bu[b] ? md.bu[b].del_rev : 0 }))
+    .sort((a,b) => b.rev - a.rev)[0];
+  const revBadges = document.getElementById('badges-revenue');
+  if (revBadges && topBU) {
+    const momPct = md.vs_prior_month?.change_pct;
+    const momCol = momPct == null ? '#64748B' : momPct >= 0 ? '#10B981' : '#EF4444';
+    const momTxt = momPct == null ? '' : ` · ${momPct >= 0 ? '+' : ''}${momPct}% vs LM`;
+    revBadges.innerHTML =
+      badge(`${topBU.name} leads · ${fmtNum(topBU.rev)} Cr`, '#3B82F6') +
+      badge(`${fmtNum(md.total_del_rev)} Cr total${momTxt}`, momCol);
+  }
+
+  // ── Categories ────────────────────────────────────
+  const topCat   = (md.categories || [])[0];
+  const catBadges = document.getElementById('badges-categories');
+  if (catBadges && topCat) {
+    const priorCat  = (priorMd?.categories || []).find(c => c.name === topCat.name);
+    const bigMover  = (md.categories || []).reduce((best, cat) => {
+      const prior = (priorMd?.categories || []).find(c => c.name === cat.name);
+      if (!prior || prior.del_rev <= 0) return best;
+      const pct = ((cat.del_rev - prior.del_rev) / prior.del_rev) * 100;
+      return Math.abs(pct) > Math.abs(best.pct || 0) ? { name: cat.name, pct: r2(pct) } : best;
+    }, {});
+    const moverCol  = bigMover.pct > 0 ? '#10B981' : '#EF4444';
+    const moverTxt  = bigMover.name
+      ? `${bigMover.name} ${bigMover.pct > 0 ? '↑' : '↓'} ${Math.abs(bigMover.pct)}%`
+      : 'No prior data';
+    catBadges.innerHTML =
+      badge(`${topCat.name} · ${fmtNum(topCat.del_rev)} Cr`, '#10B981') +
+      badge(moverTxt, moverCol);
+  }
+
+  // ── Clients ───────────────────────────────────────
+  const lyClientNames   = new Set((lyMd?.top_clients || []).map(c => c.name));
+  const newClientsCount = (md.top_clients || []).filter(c => !lyClientNames.has(c.name)).length;
+  const cliBadges = document.getElementById('badges-clients');
+  if (cliBadges) {
+    cliBadges.innerHTML =
+      badge(`${fmtInt(md.total_clients)} active clients`, '#8B5CF6') +
+      badge(`${newClientsCount} new vs last year`, '#3B82F6');
+  }
+
+  // ── Watch List ────────────────────────────────────
+  const currentNames = new Set((md.top_clients || []).map(c => c.name));
+  let redChurners = 0, amberChurners = 0;
+  const seenChurners = new Set();
+  DATA.available_months.forEach(mkey => {
+    if (mkey >= CURRENT_MONTH) return;
+    const gone  = monthDiff(mkey, CURRENT_MONTH);
+    if (gone > 12) return;
+    const mdata = DATA.months[mkey]; if (!mdata) return;
+    (mdata.top_clients || []).forEach(c => {
+      if (currentNames.has(c.name) || seenChurners.has(c.name)) return;
+      seenChurners.add(c.name);
+      if (gone <= 2)      redChurners++;
+      else if (gone <= 6) amberChurners++;
+    });
+  });
+
+  // Cohort retention rate
+  const cohortMKey = (() => {
+    let y = parseInt(CURRENT_MONTH.slice(0,4));
+    let m = parseInt(CURRENT_MONTH.slice(5,7)) - 12;
+    while (m < 1) { m += 12; y--; }
+    return y + '-' + String(m).padStart(2,'0');
+  })();
+  const cohortMd   = DATA.months[cohortMKey];
+  const priorNames = new Set();
+  DATA.available_months.filter(k => k < cohortMKey).forEach(k => {
+    (DATA.months[k]?.top_clients || []).forEach(c => priorNames.add(c.name));
+  });
+  const cohortClients  = cohortMd
+    ? (cohortMd.top_clients || []).filter(c => !priorNames.has(c.name))
+    : [];
+  const retainedCount  = cohortClients.filter(c => currentNames.has(c.name)).length;
+  const retentionRate  = cohortClients.length > 0
+    ? Math.round((retainedCount / cohortClients.length) * 100) : null;
+
+  const watchBadges = document.getElementById('badges-watchlist');
+  if (watchBadges) {
+    const churnerCol = redChurners > 0 ? '#EF4444' : amberChurners > 0 ? '#F59E0B' : '#10B981';
+    const churnerTxt = redChurners > 0
+      ? `${redChurners} critical churner${redChurners > 1 ? 's' : ''}`
+      : amberChurners > 0
+        ? `${amberChurners} at-risk churner${amberChurners > 1 ? 's' : ''}`
+        : 'No critical churners';
+    const retTxt = retentionRate !== null ? `${retentionRate}% cohort retention` : 'Cohort data loading';
+    const retCol = retentionRate === null ? '#64748B' : retentionRate >= 60 ? '#10B981' : retentionRate >= 40 ? '#F59E0B' : '#EF4444';
+    watchBadges.innerHTML =
+      badge(churnerTxt, churnerCol) +
+      badge(retTxt, retCol);
+  }
+}
+// ── Section nav + collapse ────────────────────────
+function toggleSec(secId) {
+  const body = document.getElementById('body-' + secId);
+  const chev = document.getElementById('chev-' + secId);
+  if (!body) return;
+  const isOpen = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  chev.classList.toggle('open', !isOpen);
+}
+
+function jumpToSection(secId, btn) {
+  // Update nav active state
+  document.querySelectorAll('.snav-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // Open that section
+  const body = document.getElementById('body-' + secId);
+  const chev = document.getElementById('chev-' + secId);
+  if (body && !body.classList.contains('open')) {
+    body.classList.add('open');
+    chev.classList.add('open');
+  }
+  // Scroll to it
+  const block = document.getElementById(secId);
+  if (block) block.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+// ── Section nav scroll spy ────────────────────────
+function initScrollSpy() {
+  const sections = ['sec-revenue','sec-categories','sec-clients','sec-watchlist'];
+  const buttons  = document.querySelectorAll('.snav-btn');
+  const main     = document.querySelector('.main');
+  if (!main) return;
+
+  main.addEventListener('scroll', () => {
+    let activeIdx = 0;
+    sections.forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.top <= 160) activeIdx = i;
+    });
+    buttons.forEach((b, i) => b.classList.toggle('active', i === activeIdx));
+  }, { passive: true });
 }
 // ── Formatters ────────────────────────────────────
 function fmtNum(n){const v=Number(n)||0; return v>=5?v.toFixed(1):v.toFixed(2);}
