@@ -472,14 +472,14 @@ function renderKPIs(md) {
   if (!anyFilterActive) {
     totalRev     = md.total_del_rev;
     totalClients = md.total_clients;
-    totalBooked  = ['LCS1','LCS2','MM1','MM2'].reduce((t,b) => t + (md.bu[b] ? ((md.bu[b].booked_rev||0)/10000000) : 0), 0);
+    totalBooked  = ['LCS1','LCS2','MM1','MM2'].reduce((t,b) => t + (md.bu[b] && md.bu[b].booked_rev != null ? md.bu[b].booked_rev : 0), 0);
   } else {
     totalRev     = r2(filteredClients.reduce((t,c) => t + clientRevForFilters(c), 0));
     totalClients = filteredClients.filter(c => clientRevForFilters(c) > 0).length;
     totalBooked  = r2(filteredClients.reduce((t,c) => {
-      const cr = clientRevForFilters(c);
-      return t + (c.del_rev > 0 ? (c.booked_rev||0) * (cr/c.del_rev) / 10000000 : 0);
-    }, 0));
+const cr = clientRevForFilters(c);
+return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev) : 0);
+}, 0));
   }
 
   // ── CTV / Mobile split ─────────────────────────────────────
@@ -528,23 +528,18 @@ function renderKPIs(md) {
     const pct      = priorRev > 0 ? r2(((cat.del_rev - priorRev) / priorRev) * 100) : null;
     return { name: cat.name, type: 'Category', delta, pct };
   });
-  const allMovers = [...buMovers, ...catMovers].filter(m => m.delta > 0).sort((a, b) => b.delta - a.delta);
+  const allMovers = [...buMovers, ...catMovers].filter(m => m.delta !== 0).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   const topMover  = allMovers[0] || null;
 
-  // ── Next Month Pipeline ─────────────────────────────────────
-  const nextMKey    = nextMonthKey(CURRENT_MONTH);
-  const nextMd      = DATA.months[nextMKey] || null;
-  const lyNextMd    = DATA.months[lyMonthKey(nextMKey)] || null;
-  const nextBooked  = nextMd
-    ? r2(['LCS1','LCS2','MM1','MM2'].reduce((t, bu) => t + (nextMd.bu[bu] ? (nextMd.bu[bu].booked_rev || 0) / 10000000 : 0), 0))
-    : null;
-  const lyNextDel   = lyNextMd ? lyNextMd.total_del_rev : null;
-  const nextVsLyPct = (nextBooked !== null && lyNextDel && lyNextDel > 0)
-    ? r2(((nextBooked - lyNextDel) / lyNextDel) * 100)
-    : null;
-    const nextVsCurrPct = (nextBooked !== null && totalRev && totalRev > 0)
-    ? r2(((nextBooked - totalRev) / totalRev) * 100)
-    : null;
+  // ── eCPM Card ──────────────────────────────────────────────
+  const ecpmVal   = computeEcpm(md);
+  const priorEcpm = computeEcpm(DATA.months[priorMonthKey(CURRENT_MONTH)] || null);
+  const lyEcpm    = computeEcpm(DATA.months[lyMonthKey(CURRENT_MONTH)]    || null);
+ 
+  const ecpmMomPct = (ecpmVal !== null && priorEcpm !== null && priorEcpm > 0)
+    ? r2(((ecpmVal - priorEcpm) / priorEcpm) * 100) : null;
+  const ecpmLyPct  = (ecpmVal !== null && lyEcpm    !== null && lyEcpm    > 0)
+    ? r2(((ecpmVal - lyEcpm)    / lyEcpm)    * 100) : null;
 
   // CTV/Mobile vs LM
   const ctvPrior    = !anyFilterActive && priorMd && md.platform['CTV']    ? priorMd.platform['CTV']?.del_rev    : null;
@@ -562,7 +557,12 @@ function renderKPIs(md) {
   
 
   document.getElementById('kpi-row').innerHTML = [
-    kpiCard('Total Del Rev',  totalRev,      'Cr', momC),
+    `<div class="kpi-card">
+      <div class="kpi-label">Total Del Rev</div>
+      <div class="kpi-value">${fmtNum(totalRev)}<span class="kpi-unit"> Cr</span></div>
+      ${momC ? `<div class="kpi-change ${momC.pct>0?'up':momC.pct<0?'down':'flat'}">${momC.pct>0?'↑':momC.pct<0?'↓':'→'} ${momC.pct>0?'+':''}${Math.abs(momC.pct)}% <span style="color:var(--ink-soft);font-size:11px">${momC.label}</span></div>` : ''}
+      ${lyC  ? `<div class="kpi-change ${lyC.pct>0?'up':lyC.pct<0?'down':'flat'}">${lyC.pct>0?'↑':lyC.pct<0?'↓':'→'} ${lyC.pct>0?'+':''}${Math.abs(lyC.pct)}% <span style="color:var(--ink-soft);font-size:11px">${lyC.label}</span></div>` : ''}
+    </div>`,
     kpiCard('Active Clients', totalClients,  '',   lyC),
     kpiCard('CTV Rev',        adjCTV,        'Cr', ctvMomC,  ctvMomC  ? null : 'incl. Mob+CTV split'),
     kpiCard('Mobile Rev',     adjMobile,     'Cr', mobMomC,  mobMomC  ? null : 'incl. Mob+CTV split'),
@@ -572,20 +572,19 @@ function renderKPIs(md) {
       ? `<div class="kpi-card">
           <div class="kpi-label">Biggest mover this month</div>
           <div style="font-size:22px;font-weight:600;color:var(--ink);letter-spacing:-0.02em;margin:6px 0 6px;line-height:1.2">${topMover.name}</div>
-          <div style="font-size:13px;font-family:var(--mono);font-weight:500;color:var(--green)">+${fmtNum(topMover.delta)} Cr vs last month</div>
+          <div style="font-size:13px;font-family:var(--mono);font-weight:500;color:${topMover.delta >= 0 ? 'var(--green)' : 'var(--red)'}">${topMover.delta >= 0 ? '+' : ''}${fmtNum(topMover.delta)} Cr vs last month</div>
           <div style="font-size:11px;color:var(--ink-soft);margin-top:3px">${topMover.type} · largest absolute gain</div>
         </div>`
       : kpiCard('Biggest mover', 0, 'Cr', null, 'No prior month data'),
-    nextBooked !== null
+    ecpmVal !== null
       ? `<div class="kpi-card">
-          <div class="kpi-label">Next month pipeline</div>
-          <div class="kpi-value" style="margin:6px 0 4px">${fmtNum(nextBooked)}<span class="kpi-unit"> Cr</span></div>
-          <div style="font-size:12px;color:var(--ink-soft);margin-bottom:4px">Confirmed bookings · ${nextMd ? nextMd.label : ''}</div>
-          ${nextVsCurrPct !== null
-            ? `<div class="kpi-change ${nextVsCurrPct >= 0 ? 'up' : 'down'}">${nextVsCurrPct >= 0 ? '↑' : '↓'} ${Math.abs(nextVsCurrPct)}% ${nextVsCurrPct >= 0 ? 'ahead of' : 'behind'} ${md.label} delivered</div>`
-            : ''}
+          <div class="kpi-label">eCPM</div>
+          <div class="kpi-value">₹${fmtNum(ecpmVal)}<span class="kpi-unit"> </span></div>
+          <div style="font-size:11px;color:var(--ink-soft);margin-bottom:4px">Preroll + Midroll · excl. Mediation</div>
+          ${ecpmMomPct !== null ? `<div class="kpi-change ${ecpmMomPct>=0?'up':'down'}">${ecpmMomPct>=0?'↑':'↓'} ${Math.abs(ecpmMomPct)}% <span style="color:var(--ink-soft);font-size:11px">vs ${DATA.months[priorMonthKey(CURRENT_MONTH)]?.label||'LM'}</span></div>` : ''}
+          ${ecpmLyPct  !== null ? `<div class="kpi-change ${ecpmLyPct>=0?'up':'down'}">${ecpmLyPct>=0?'↑':'↓'} ${Math.abs(ecpmLyPct)}% <span style="color:var(--ink-soft);font-size:11px">vs ${DATA.months[lyMonthKey(CURRENT_MONTH)]?.label||'LY'}</span></div>` : ''}
         </div>`
-      : kpiCard('Next month pipeline', 0, 'Cr', null, 'No bookings data yet'),
+      : kpiCard('eCPM', 0, '', null, 'No Preroll/Midroll data for this filter'),
   ].join('');
 }
 function kpiCard(label,val,unit,ch,note) {
@@ -593,6 +592,42 @@ function kpiCard(label,val,unit,ch,note) {
   if(ch){const cls=ch.pct>0?'up':ch.pct<0?'down':'flat';const arr=ch.pct>0?'↑':ch.pct<0?'↓':'→';c=`<div class="kpi-change ${cls}">${arr} ${ch.pct>0?'+':''}${Math.abs(ch.pct)}% <span style="color:var(--ink-soft);font-size:11px">${ch.label}</span></div>`;}
   else if(note){c=`<div class="kpi-change flat">${note}</div>`;}
   return `<div class="kpi-card"><div class="kpi-label">${label}</div><div class="kpi-value">${unit===''?fmtInt(val):fmtNum(val)}<span class="kpi-unit"> ${unit}</span></div>${c}</div>`;
+}
+function computeEcpm(md) {
+  if (!md || !md.ecpm_data || !md.ecpm_data.rows) return null;
+ 
+  // eCPM not applicable for Display or non-video formats
+  if (CURRENT_ADTYPE === 'Display') return null;
+  if (CURRENT_FORMAT !== 'all' && !['Preroll','Midroll'].includes(CURRENT_FORMAT)) return null;
+ 
+  let rows = md.ecpm_data.rows;
+ 
+  // Apply BU filter
+  if (CURRENT_BU !== 'all') {
+    if (CURRENT_BU === 'Others') {
+      const MAIN = new Set(['LCS1','LCS2','MM1','MM2']);
+      rows = rows.filter(r => !MAIN.has(r.bu));
+    } else {
+      rows = rows.filter(r => r.bu === CURRENT_BU);
+    }
+  }
+ 
+  // Apply Platform filter
+  if (CURRENT_PLATFORM !== 'all') {
+    rows = rows.filter(r => r.platform === CURRENT_PLATFORM);
+  }
+ 
+  // Apply Format filter (Preroll / Midroll)
+  if (CURRENT_FORMAT !== 'all') {
+    rows = rows.filter(r => r.format === CURRENT_FORMAT);
+  }
+ 
+  if (!rows.length) return null;
+ 
+  const totalRevCr = rows.reduce((t, r) => t + r.rev_cr, 0);
+  const totalImp   = rows.reduce((t, r) => t + r.imp,    0);
+ 
+  return totalImp > 0 ? r2((totalRevCr * 10000000 / totalImp) * 1000) : null;
 }
 // ── Shared helpers ────────────────────────────────
 function growthBadge(pct) {
@@ -734,10 +769,10 @@ function renderBU(md) {
       else                                      { booked = b.booked_rev;               clientCount = b.clients; }
 
       return {
-        rev:     r2(buRevFromStored(b)),
-        booked:  r2((booked || 0) / 10000000),
-        clients: clientCount || 0,
-      };
+rev:     r2(buRevFromStored(b)),
+booked:  booked != null ? r2(booked) : null,
+clients: clientCount || 0,
+};
     }
 
     // Category/Agency filter active — aggregate from top_clients
@@ -745,11 +780,12 @@ function renderBU(md) {
     clients = filterClientsByBU(clients, buName);
     if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
     if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
-    return {
-      rev:     r2(clients.reduce((t, c) => t + clientRev(c), 0)),
-      booked:  r2(clients.reduce((t, c) => t + (c.booked_rev || 0), 0) / 10000000),
-      clients: clients.length,
-    };
+    const hasBooked = clients.some(c => c.booked_rev != null);
+return {
+rev:     r2(clients.reduce((t, c) => t + clientRev(c), 0)),
+booked:  hasBooked ? r2(clients.reduce((t, c) => t + (c.booked_rev || 0), 0)) : null,
+clients: clients.length,
+};
   };
 
   const anyFilterActive = CURRENT_PLATFORM !== 'all' || CURRENT_ADTYPE !== 'all'
@@ -787,7 +823,7 @@ function renderBU(md) {
       loyPct   = ly.rev    > 0 ? r2(((curr.rev - ly.rev)    / ly.rev)    * 100) : null;
     } else {
       rev      = activeRevField(b);
-      bookedCr = r2((b.booked_rev || 0) / 10000000);
+      bookedCr = b.booked_rev != null ? r2(b.booked_rev) : null;
       clients  = bu === 'Others' ? '—' : (b.clients || 0);
       momPct   = b.growth_vs_lm ?? null;
       loyPct   = b.growth_vs_ly ?? null;
@@ -796,7 +832,7 @@ function renderBU(md) {
     return `<tr style="${!isActive?'opacity:0.3':''}">
       <td><span class="badge ${cls}">${bu}</span></td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(rev)} Cr</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(bookedCr)} Cr</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${bookedCr != null ? fmtNum(bookedCr) + ' Cr' : '—'}</td>
       <td style="text-align:right;color:var(--ink-soft)">—</td>
       <td style="text-align:right;color:var(--ink-soft)">—</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
@@ -826,7 +862,7 @@ function renderBU(md) {
       if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    }
     } else {
       rev      = activeRevField(b);
-      bookedCr = r2((b.booked_rev || 0) / 10000000);
+      bookedCr = b.booked_rev != null ? r2(b.booked_rev) : null;
       clients  = bu === 'Others' ? 0 : (b.clients || 0);
       if (b.growth_vs_lm != null) { totalMomNum += rev * (b.growth_vs_lm/100); totalMomDen += rev / (1 + b.growth_vs_lm/100); }
       if (b.growth_vs_ly != null) { totalLyNum  += rev * (b.growth_vs_ly/100); totalLyDen  += rev / (1 + b.growth_vs_ly/100); }
@@ -842,7 +878,7 @@ function renderBU(md) {
   const totalRow = '<tr style="background:var(--surface);font-weight:600;border-top:2px solid var(--border)">' +
     '<td><span class="badge badge-gray">Total</span></td>' +
     '<td style="text-align:right;font-family:var(--mono);font-weight:600">' + fmtNum(r2(totalRev)) + ' Cr</td>' +
-    '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + fmtNum(r2(totalBooked)) + ' Cr</td>' +
+    '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
     '<td style="text-align:right">' + growthBadge(totalMomPct) + '</td>' +
@@ -876,7 +912,7 @@ function renderPlatform(md) {
     } else if (a === 'Video')   booked = pl.video_booked   ?? pl.booked_rev;
     else if (a === 'Display')   booked = pl.display_booked ?? pl.booked_rev;
     else                        booked = pl.booked_rev;
-    return r2((booked || 0) / 10000000);
+    return booked != null ? r2(booked) : null;
   };
 
   const platformClientsFromStored = (pl) => {
@@ -978,9 +1014,9 @@ function renderPlatform(md) {
       else if (platformName==='Mobile')                    booked = buData.mobile_booked;
       else if (platformName==='Mobile+CTV')                booked = buData.mobilectv_booked;
       else                                                 booked = buData.booked_rev;
-      booked = r2((booked || 0) / 10000000);
+      booked = booked != null ? r2(booked) : null;
     } else {
-      booked = r2(bookedSum / 10000000);
+      booked = r2(bookedSum);
     }
 
     return { rev: r2(rev), booked, clients: platClientCount };
@@ -1014,7 +1050,7 @@ function renderPlatform(md) {
       loyPct   = ly.rev    > 0 ? r2(((curr.rev - ly.rev)    / ly.rev)    * 100) : null;
     } else {
       rev      = pl.del_rev ?? 0;
-      bookedCr = r2((pl.booked_rev || 0) / 10000000);
+      bookedCr = pl.booked_rev != null ? r2(pl.booked_rev) : null;
       clients  = pl.clients || 0;
       momPct   = pl.growth_vs_lm ?? null;
       loyPct   = pl.growth_vs_ly ?? null;
@@ -1023,7 +1059,7 @@ function renderPlatform(md) {
     return '<tr style="' + (!isActive ? 'opacity:0.3' : '') + '">' +
       '<td><span class="badge ' + cls + '">' + p + '</span></td>' +
       '<td style="text-align:right;font-family:var(--mono);font-weight:500">' + fmtNum(rev) + ' Cr</td>' +
-      '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + fmtNum(bookedCr) + ' Cr</td>' +
+      '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (bookedCr != null ? fmtNum(bookedCr) + ' Cr' : '—') + '</td>' +
       '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
       '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
       '<td style="text-align:right">' + growthBadge(momPct) + '</td>' +
@@ -1050,7 +1086,7 @@ function renderPlatform(md) {
       if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    }
     } else {
       rev      = pl.del_rev ?? 0;
-      bookedCr = r2((pl.booked_rev || 0) / 10000000);
+      bookedCr = pl.booked_rev != null ? r2(pl.booked_rev) : null;
       clients  = pl.clients || 0;
       if (pl.growth_vs_lm != null) { totalMomNum += rev * (pl.growth_vs_lm/100); totalMomDen += rev / (1 + pl.growth_vs_lm/100); }
       if (pl.growth_vs_ly != null) { totalLyNum  += rev * (pl.growth_vs_ly/100); totalLyDen  += rev / (1 + pl.growth_vs_ly/100); }
@@ -1064,7 +1100,7 @@ function renderPlatform(md) {
   const totalRow = '<tr style="background:var(--surface);font-weight:600;border-top:2px solid var(--border)">' +
     '<td><span class="badge badge-gray">Total</span></td>' +
     '<td style="text-align:right;font-family:var(--mono);font-weight:600">' + fmtNum(r2(totalRev)) + ' Cr</td>' +
-    '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + fmtNum(r2(totalBooked)) + ' Cr</td>' +
+    '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
     '<td style="text-align:right">' + growthBadge(totalMomPct) + '</td>' +
@@ -1208,10 +1244,10 @@ function renderAdType(md) {
       const stored = monthData.ad_type?.[adType] || {};
       const clientCount = (monthData.top_clients || []).filter(c => clientRev(c, isVideo) > 0).length;
       return {
-        rev:     stored.del_rev ?? 0,
-        booked:  r2((stored.booked_rev ?? 0) / 10000000),
-        clients: clientCount,
-      };
+rev:     stored.del_rev ?? 0,
+booked:  stored.booked_rev != null ? r2(stored.booked_rev) : null,
+clients: clientCount,
+};
     }
 
     // Pure category filter, no BU/platform/format → read stored category data (exact, matches Excel)
@@ -1219,7 +1255,7 @@ function renderAdType(md) {
       const catData = (monthData.categories || []).find(c => c.name === CURRENT_CATEGORY) || {};
       return {
         rev:     isVideo ? (catData.video_rev || 0) : (catData.display_rev || 0),
-        booked:  r2((catData.booked_rev || 0) / 10000000),
+        booked:  catData.booked_rev != null ? r2(catData.booked_rev) : null,
         clients: catData.clients || 0,
       };
     }
@@ -1229,7 +1265,7 @@ function renderAdType(md) {
       const agData = (monthData.agencies || []).find(ag => ag.name === CURRENT_AGENCY) || {};
       return {
         rev:     isVideo ? (agData.video_rev || 0) : (agData.display_rev || 0),
-        booked:  r2((agData.booked_rev || 0) / 10000000),
+        booked:  agData.booked_rev != null ? r2(agData.booked_rev) : null,
         clients: agData.clients || 0,
       };
     }
@@ -1258,7 +1294,7 @@ function renderAdType(md) {
 
     const clientCount = filteredClients.filter(c => clientRev(c, isVideo) > 0).length;
 
-    return { rev: r2(rev), booked: r2(bookedRaw / 10000000), clients: clientCount };
+    return { rev: r2(rev), booked: r2(bookedRaw), clients: clientCount };
   };
 
   const getFormatData = (fmt, adType, monthData) => {
@@ -1280,7 +1316,7 @@ function renderAdType(md) {
         else                         bookedRaw += b[`${base}_booked`]      ?? 0;
       });
       clientCount = (monthData.top_clients || []).filter(c => clientFormatRev(c, base) > 0).length;
-      return { rev: r2(rev), booked: r2(bookedRaw / 10000000), clients: clientCount };
+      return { rev: r2(rev), booked: r2(bookedRaw), clients: clientCount };
     }
 
     if (!needsClientFilter) {
@@ -1314,7 +1350,7 @@ function renderAdType(md) {
     }
 
     clientCount = filteredClients.filter(c => clientFormatRev(c, base) > 0).length;
-    return { rev: r2(rev), booked: r2(bookedRaw / 10000000), clients: clientCount };
+    return { rev: r2(rev), booked: r2(bookedRaw), clients: clientCount };
   };
 
   // ── Build table ────────────────────────────────────────────────────────
@@ -1357,7 +1393,7 @@ function renderAdType(md) {
     rows += `<tr style="${!isTypeActive ? 'opacity:0.3' : ''}background:var(--surface)">
       <td style="font-weight:500"><span class="badge ${badgeCls}">${adType}</span></td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(curr.booked)} Cr</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
@@ -1402,7 +1438,7 @@ function renderAdType(md) {
   const totalRow = `<tr style="background:var(--surface);font-weight:600;border-top:2px solid var(--border)">
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRevSum))} Cr</td>
-    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(r2(totalBookedSum))} Cr</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBookedSum > 0 ? fmtNum(r2(totalBookedSum)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
@@ -1471,7 +1507,7 @@ function renderCategories(md) {
       const stored = (monthData.categories || []).find(c => c.name === catName) || {};
       return {
         rev:     stored.del_rev || 0,
-        booked:  r2((stored.booked_rev || 0) / 10000000),
+        booked:  stored.booked_rev != null ? r2(stored.booked_rev) : null,
         clients: stored.clients || 0,
       };
     }
@@ -1512,7 +1548,7 @@ function renderCategories(md) {
       }
     });
 
-    return { rev: r2(rev), booked: r2(bookedRaw / 10000000), clients: clientSet.size };
+    return { rev: r2(rev), booked: r2(bookedRaw), clients: clientSet.size };
   };
 
   // ── Build rows ──────────────────────────────────────────────────────────
@@ -1554,7 +1590,7 @@ function renderCategories(md) {
       <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
       <td style="font-weight:500">${cat.name} ${momPct !== null ? (momPct >= 20 ? '<span style="color:var(--green);font-size:11px">↑↑</span>' : momPct >= 5 ? '<span style="color:var(--green);font-size:11px">↑</span>' : momPct <= -20 ? '<span style="color:var(--red);font-size:11px">↓↓</span>' : momPct <= -5 ? '<span style="color:var(--red);font-size:11px">↓</span>' : '') : ''}</td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(curr.booked)} Cr</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
@@ -1583,7 +1619,7 @@ function renderCategories(md) {
     <td></td>
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRev))} Cr</td>
-    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(r2(totalBooked))} Cr</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
@@ -1652,7 +1688,7 @@ function renderAgencies(md) {
       const stored = (monthData.agencies || []).find(ag => ag.name === agName) || {};
       return {
         rev:     stored.del_rev || 0,
-        booked:  r2((stored.booked_rev || 0) / 10000000),
+        booked:  stored.booked_rev != null ? r2(stored.booked_rev) : null,
         clients: stored.clients || 0,
       };
     }
@@ -1686,7 +1722,7 @@ function renderAgencies(md) {
       clientSet.add(c.name);
     });
 
-    return { rev: r2(rev), booked: r2(bookedRaw / 10000000), clients: clientSet.size };
+    return { rev: r2(rev), booked: r2(bookedRaw), clients: clientSet.size };
   };
 
   // ── Build rows ──────────────────────────────────────────────────────────
@@ -1726,7 +1762,7 @@ function renderAgencies(md) {
       <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
       <td style="font-weight:500">${ag.name}</td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(curr.booked)} Cr</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
@@ -1754,7 +1790,7 @@ function renderAgencies(md) {
     <td></td>
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRev))} Cr</td>
-    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(r2(totalBooked))} Cr</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
@@ -1817,9 +1853,9 @@ function renderClients(md) {
   clients = clients.map(c => ({
     ...c,
     _filteredRev:    clientRevForFilters(c),
-    _filteredBooked: c.del_rev > 0
-      ? r2((c.booked_rev || 0) * (clientRevForFilters(c) / c.del_rev) / 10000000)
-      : 0,
+    _filteredBooked: c.booked_rev != null && c.del_rev > 0
+? r2(c.booked_rev * (clientRevForFilters(c) / c.del_rev))
+: null,
   }));
   clients.sort((a, b) => b._filteredRev - a._filteredRev);
   clients = clients.filter(c => c._filteredRev > 0);
@@ -1874,7 +1910,7 @@ function renderClients(md) {
       <td><span style="font-weight:500;cursor:pointer;color:var(--accent);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="openClientDive('${c.name.replace(/'/g, "\\'")}')">${c.name}</span>${expandBtn}</td>
       <td><span class="badge badge-blue">${c.bu}</span></td>
       <td style="font-family:var(--mono);font-weight:500;text-align:right">${fmtNum(rev)} Cr</td>
-      <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right">${fmtNum(booked)} Cr</td>
+      <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right">${booked != null ? fmtNum(booked) + ' Cr' : '—'}</td>
       <td style="font-size:12px;color:var(--ink-soft)">${c.category||'—'}</td>
 <td style="font-size:11px">${lyClientNames.has(c.name) ? '<span style="color:var(--green)">🔄 Repeat</span>' : '<span style="color:var(--accent)">🆕 New</span>'}</td>
       <td style="font-size:12px;color:var(--ink-soft)">${c.agency||'—'}</td>
@@ -1901,7 +1937,7 @@ function renderClients(md) {
     <td><span class="badge badge-gray">Total (Top ${clients.length})</span></td>
     <td></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRev))} Cr</td>
-    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(r2(totalBooked))} Cr</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—'}</td>
     <td colspan="7"></td>
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
   </tr>`;
@@ -1988,259 +2024,81 @@ function clientHealthScore(clientName, currentRev) {
   if (score >= 40) return { status: 'watch',   color: '#F59E0B', label: 'Watch',    dot: '🟡' };
   return             { status: 'risk',    color: '#EF4444', label: 'At Risk',  dot: '🔴' };
 }
-// ── New Client Cohort Health ──────────────────────
-function renderCohort() {
-  const panel = document.getElementById('cohort-panel');
-  if (!panel || !DATA || !CURRENT_MONTH) return;
-
-  // Cohort month = 12 months ago
-  const cohortMKey = (() => {
-    let y = parseInt(CURRENT_MONTH.slice(0,4));
-    let m = parseInt(CURRENT_MONTH.slice(5,7)) - 12;
-    while (m < 1) { m += 12; y--; }
-    return y + '-' + String(m).padStart(2,'0');
-  })();
-
-  const cohortMd  = DATA.months[cohortMKey];
-  const currentMd = DATA.months[CURRENT_MONTH];
-
-  if (!cohortMd || !currentMd) {
-    panel.innerHTML = '<div style="padding:20px 18px;color:var(--ink-soft);font-size:13px">Not enough historical data to build a 12-month cohort.</div>';
-    return;
-  }
-
-  // ── Find clients who were NEW in cohort month ─────
-  // "New" = appeared in cohortMKey but NOT in any earlier month
-  const priorToCohorKeys = DATA.available_months.filter(k => k < cohortMKey);
-  const priorNames = new Set();
-  priorToCohorKeys.forEach(k => {
-    (DATA.months[k]?.top_clients || []).forEach(c => priorNames.add(c.name));
-  });
-
-  const cohortClients = (cohortMd.top_clients || []).filter(c => !priorNames.has(c.name));
-
-  if (!cohortClients.length) {
-    panel.innerHTML = '<div style="padding:20px 18px;color:var(--ink-soft);font-size:13px">No new clients found in the cohort month (' + (cohortMd.label || cohortMKey) + ').</div>';
-    return;
-  }
-
-  // ── Check current status of each cohort client ────
-  const currentNames = new Map((currentMd.top_clients || []).map(c => [c.name, c]));
-
-  const cohortRows = cohortClients.map(c => {
-    const currentClient = currentNames.get(c.name);
-    const currentRev    = currentClient ? r2(currentClient.del_rev || 0) : 0;
-    const firstRev      = r2(c.del_rev || 0);
-    const retained      = currentRev > 0;
-    const grew          = retained && currentRev > firstRev;
-    const growthPct     = retained && firstRev > 0
-      ? r2(((currentRev - firstRev) / firstRev) * 100) : null;
-
-    return {
-      name:       c.name,
-      bu:         c.bu || '—',
-      category:   c.category || '—',
-      agency:     c.agency   || '—',
-      firstRev,
-      currentRev,
-      retained,
-      grew,
-      growthPct,
-    };
-  }).sort((a, b) => b.firstRev - a.firstRev);
-
-  // ── Summary numbers ───────────────────────────────
-  const total    = cohortRows.length;
-  const retained = cohortRows.filter(c => c.retained).length;
-  const grew     = cohortRows.filter(c => c.grew).length;
-  const churned  = total - retained;
-  const retRate  = total > 0 ? Math.round((retained / total) * 100) : 0;
-  const growRate  = retained > 0 ? Math.round((grew / retained) * 100) : 0;
-
-  // ── Funnel bar ────────────────────────────────────
-  const funnelHtml = `
-    <div style="display:flex;align-items:center;gap:0;height:10px;border-radius:6px;overflow:hidden;margin-top:10px;width:100%">
-      <div style="flex:${grew};background:#10B981;transition:flex 0.4s"></div>
-      <div style="flex:${retained - grew};background:#3B82F6;transition:flex 0.4s"></div>
-      <div style="flex:${churned};background:#EF4444;opacity:0.35;transition:flex 0.4s"></div>
-    </div>
-    <div style="display:flex;gap:16px;margin-top:8px;flex-wrap:wrap">
-      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:8px;height:8px;border-radius:2px;background:#10B981"></div>Retained & Grew (${grew})</div>
-      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:8px;height:8px;border-radius:2px;background:#3B82F6"></div>Retained Flat (${retained - grew})</div>
-      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft)"><div style="width:8px;height:8px;border-radius:2px;background:#EF4444;opacity:0.6"></div>Churned (${churned})</div>
-    </div>`;
-
-  // ── Summary card ──────────────────────────────────
-  const summaryHtml = `
-    <div style="display:flex;gap:12px;padding:16px 18px 12px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
-      <div style="flex:1;min-width:120px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-bottom:4px">Cohort Month</div>
-        <div style="font-size:18px;font-weight:600;color:var(--ink)">${cohortMd.label || cohortMKey}</div>
-        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${total} new clients</div>
-      </div>
-      <div style="flex:1;min-width:120px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-bottom:4px">Retention Rate</div>
-        <div style="font-size:28px;font-weight:600;color:${retRate >= 60 ? 'var(--green)' : retRate >= 40 ? 'var(--amber)' : 'var(--red)'}">${retRate}%</div>
-        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${retained} of ${total} still active</div>
-      </div>
-      <div style="flex:1;min-width:120px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-bottom:4px">Growth Rate</div>
-        <div style="font-size:28px;font-weight:600;color:${growRate >= 50 ? 'var(--green)' : 'var(--amber)'}">${growRate}%</div>
-        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${grew} of ${retained} retained grew spend</div>
-      </div>
-      <div style="flex:2;min-width:200px;padding-top:4px">
-        ${funnelHtml}
-      </div>
-    </div>`;
-
-  // ── Table ─────────────────────────────────────────
-  const headers = [
-    { label: '#',            w: '28px'  },
-    { label: 'Client'                   },
-    { label: 'BU',           w: '60px'  },
-    { label: 'Category'                 },
-    { label: 'First Rev',    right: true, w: '84px' },
-    { label: 'Now Rev',      right: true, w: '84px' },
-    { label: 'Growth',       right: true, w: '80px' },
-    { label: 'Status',       w: '130px' },
-  ];
-
-  const ths = headers.map(h =>
-    `<th style="text-align:${h.right ? 'right' : 'left'};min-width:${h.w || 'auto'}">${h.label}</th>`
-  ).join('');
-
-  const rows = cohortRows.map((c, i) => {
-    const buCls = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
-
-    let statusBadge;
-    if (!c.retained) {
-      statusBadge = `<span style="font-size:11px;font-weight:500;color:var(--red);background:var(--red-soft);padding:2px 8px;border-radius:10px">● Churned</span>`;
-    } else if (c.grew) {
-      statusBadge = `<span style="font-size:11px;font-weight:500;color:var(--green);background:var(--green-soft);padding:2px 8px;border-radius:10px">↑ Retained & Grew</span>`;
-    } else {
-      statusBadge = `<span style="font-size:11px;font-weight:500;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:10px">→ Retained Flat</span>`;
-    }
-
-    const nowCell = c.retained
-      ? `<span style="font-family:var(--mono);font-weight:500">${fmtNum(c.currentRev)} Cr</span>`
-      : `<span style="color:var(--ink-faint)">—</span>`;
-
-    const growthCell = c.growthPct !== null
-      ? growthBadge(c.growthPct)
-      : `<span style="color:var(--ink-faint)">—</span>`;
-
-    return `<tr>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i + 1}</td>
-      <td style="font-weight:500">${c.name}</td>
-      <td><span class="badge ${buCls}">${c.bu}</span></td>
-      <td style="font-size:12px;color:var(--ink-soft)">${c.category}</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${fmtNum(c.firstRev)} Cr</td>
-      <td style="text-align:right">${nowCell}</td>
-      <td style="text-align:right">${growthCell}</td>
-      <td>${statusBadge}</td>
-    </tr>`;
-  }).join('');
-
-  panel.innerHTML = summaryHtml + `
-    <div style="overflow-x:auto">
-      <table class="ptable">
-        <thead><tr>${ths}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-// ── Churner Watch ─────────────────────────────────
+// ── Churner Watch (NEW LOGIC) ─────────────────────
+// Only looks at LM and LY same month
+// Churner = was in LM or LY but missing from current month
 function renderChurners() {
   const panel = document.getElementById('churner-panel');
   if (!panel || !DATA || !CURRENT_MONTH) return;
 
-  const md = DATA.months[CURRENT_MONTH];
-  if (!md) return;
+  const md      = DATA.months[CURRENT_MONTH]; if (!md) return;
+  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
 
-  // All client names active this month
   const currentNames = new Set((md.top_clients || []).map(c => c.name));
 
-  // Walk every past month and build churner profile map
-  const churnerMap = {};
-
-  DATA.available_months.forEach(mkey => {
-    if (mkey >= CURRENT_MONTH) return;
-    const mdata = DATA.months[mkey];
-    if (!mdata) return;
-
-    (mdata.top_clients || []).forEach(c => {
-      if (currentNames.has(c.name)) return; // still active
-
-      // Dominant platform in this month for this client
-      const ctvRev    = c.ctv_rev       || 0;
-      const mobRev    = c.mobile_rev    || 0;
-      const mctvRev   = c.mobilectv_rev || 0;
-      const platPeak  = Math.max(ctvRev, mobRev, mctvRev);
-      const platLabel = platPeak === 0 ? '—'
-        : platPeak === ctvRev    ? 'CTV'
-        : platPeak === mobRev    ? 'Mobile'
-        : 'Mobile+CTV';
-
-      if (!churnerMap[c.name]) {
-        churnerMap[c.name] = {
+  const buildChurners = (refMd, refLabel, tag) => {
+    if (!refMd) return [];
+    return (refMd.top_clients || [])
+      .filter(c => !currentNames.has(c.name))
+      .filter(c => {
+        if (CURRENT_BU !== 'all' && CURRENT_BU !== 'Others' && c.bu !== CURRENT_BU) return false;
+        if (CURRENT_BU === 'Others' && MAIN_BUS.includes(c.bu)) return false;
+        if (CURRENT_CATEGORY !== 'all' && c.category !== CURRENT_CATEGORY) return false;
+        if (CURRENT_AGENCY   !== 'all' && c.agency   !== CURRENT_AGENCY)   return false;
+        return true;
+      })
+      .map(c => {
+        const ctvRev   = c.ctv_rev       || 0;
+        const mobRev   = c.mobile_rev    || 0;
+        const mctvRev  = c.mobilectv_rev || 0;
+        const platPeak = Math.max(ctvRev, mobRev, mctvRev);
+        const platLabel = platPeak === 0 ? '—'
+          : platPeak === ctvRev   ? 'CTV'
+          : platPeak === mobRev   ? 'Mobile'
+          : 'Mobile+CTV';
+        return {
           name:      c.name,
-          bu:        c.bu,
+          bu:        c.bu || '—',
           category:  c.category || '—',
           agency:    c.agency   || '—',
-          lastMonth: mkey,
-          lastRev:   c.del_rev,
+          lastRev:   c.del_rev  || 0,
           lastPlat:  platLabel,
-          peakRev:   c.del_rev,
-          peakMonth: mkey,
+          refLabel,
+          tag,
         };
-      } else {
-        if (mkey > churnerMap[c.name].lastMonth) {
-          churnerMap[c.name].lastMonth = mkey;
-          churnerMap[c.name].lastRev   = c.del_rev;
-          churnerMap[c.name].lastPlat  = platLabel;
-        }
-        if (c.del_rev > churnerMap[c.name].peakRev) {
-          churnerMap[c.name].peakRev   = c.del_rev;
-          churnerMap[c.name].peakMonth = mkey;
-        }
-      }
-    });
+      });
+  };
+
+  const lmChurners = buildChurners(priorMd, priorMd ? priorMd.label : 'LM', 'LM');
+  const lyChurners = buildChurners(lyMd,    lyMd    ? lyMd.label    : 'LY', 'LY');
+
+  // Merge: if a client appears in both, show LM tag (more urgent), deduplicate by name
+  const seen = new Set();
+  const churners = [];
+  [...lmChurners, ...lyChurners].forEach(c => {
+    if (seen.has(c.name)) return;
+    seen.add(c.name);
+    churners.push(c);
   });
 
-  // Filter to last 12 months only, sort by peak revenue
-  const churners = Object.values(churnerMap)
-    .filter(c => {
-      const gone = monthDiff(c.lastMonth, CURRENT_MONTH);
-      if (gone < 1 || gone > 12) return false;
-      if (CURRENT_BU !== 'all' && CURRENT_BU !== 'Others') {
-        if (c.bu !== CURRENT_BU) return false;
-      }
-      if (CURRENT_BU === 'Others') {
-        if (MAIN_BUS.includes(c.bu)) return false;
-      }
-      if (CURRENT_CATEGORY !== 'all' && c.category !== CURRENT_CATEGORY) return false;
-      if (CURRENT_AGENCY   !== 'all' && c.agency   !== CURRENT_AGENCY)   return false;
-      return true;
-    })
-    .sort((a, b) => b.peakRev - a.peakRev)
-    .slice(0, 20);
+  // Sort by last rev desc
+  churners.sort((a, b) => b.lastRev - a.lastRev);
 
   if (!churners.length) {
-    panel.innerHTML = '<div style="padding:24px 18px;color:var(--ink-soft);font-size:13px">No churned clients found in the last 12 months.</div>';
+    panel.innerHTML = '<div style="padding:24px 18px;color:var(--ink-soft);font-size:13px">No churned clients vs last month or last year same month.</div>';
     return;
   }
 
   const headers = [
-    { label: '#',            w: '28px'  },
-    { label: 'Client'                   },
-    { label: 'BU',           w: '60px'  },
-    { label: 'Category'                 },
-    { label: 'Agency'                   },
-    { label: 'Last active',  right: true, w: '100px' },
-    { label: 'Months gone',  right: true, w: '90px'  },
-    { label: 'Last platform',            w: '110px'  },
-    { label: 'Peak Rev',     right: true, w: '84px'  },
-    { label: 'Peak month',   right: true, w: '96px'  },
+    { label: '#',           w: '28px'  },
+    { label: 'Client'                  },
+    { label: 'BU',          w: '60px'  },
+    { label: 'Category'                },
+    { label: 'Agency'                  },
+    { label: 'Last seen',   w: '110px' },
+    { label: 'Last platform',w: '110px'},
+    { label: 'Last Rev',    right: true, w: '84px' },
   ];
 
   const ths = headers.map(h =>
@@ -2248,30 +2106,13 @@ function renderChurners() {
   ).join('');
 
   const rows = churners.map((c, i) => {
-    const gone = monthDiff(c.lastMonth, CURRENT_MONTH);
-
-    // Urgency signal
-    let urgencyColor, urgencyLabel;
-    if (gone <= 2) {
-      urgencyColor = 'var(--red)';
-      urgencyLabel = gone === 1 ? '1 month' : '2 months';
-    } else if (gone <= 6) {
-      urgencyColor = 'var(--amber)';
-      urgencyLabel = gone + ' months';
-    } else {
-      urgencyColor = 'var(--ink-faint)';
-      urgencyLabel = gone + ' months';
-    }
-
-    // Friendly month label
-    const lastLabel  = DATA.months[c.lastMonth]  ? DATA.months[c.lastMonth].label  : c.lastMonth;
-    const peakLabel  = DATA.months[c.peakMonth]  ? DATA.months[c.peakMonth].label  : c.peakMonth;
-    const buCls      = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
-
+    const buCls   = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
     const platCls = c.lastPlat === 'CTV' ? 'badge-green'
       : c.lastPlat === 'Mobile'          ? 'badge-blue'
       : c.lastPlat === 'Mobile+CTV'      ? 'badge-amber'
       : 'badge-gray';
+    const tagColor = c.tag === 'LM' ? 'var(--red)' : 'var(--amber)';
+    const tagBg    = c.tag === 'LM' ? '#EF444418' : '#F59E0B18';
 
     return `<tr>
       <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i + 1}</td>
@@ -2279,20 +2120,164 @@ function renderChurners() {
       <td><span class="badge ${buCls}">${c.bu}</span></td>
       <td style="font-size:12px;color:var(--ink-soft)">${c.category}</td>
       <td style="font-size:12px;color:var(--ink-soft)">${c.agency}</td>
-      <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${lastLabel}</td>
-      <td style="text-align:right">
-        <span style="font-size:12px;font-weight:500;color:${urgencyColor}">${urgencyLabel}</span>
+      <td>
+        <span style="font-size:11px;font-weight:500;color:${tagColor};background:${tagBg};padding:2px 8px;border-radius:10px">
+          ${c.tag === 'LM' ? '↓ Last month' : '↓ Last year'}
+        </span>
+        <span style="font-size:11px;color:var(--ink-soft);margin-left:4px">${c.refLabel}</span>
       </td>
       <td><span class="badge ${platCls}">${c.lastPlat}</span></td>
-      <td style="text-align:right;font-family:var(--mono);font-weight:500;color:var(--ink)">${fmtNum(c.peakRev)} Cr</td>
-      <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${peakLabel}</td>
+      <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(c.lastRev)} Cr</td>
     </tr>`;
   }).join('');
 
-  panel.innerHTML = `<div style="overflow-x:auto"><table class="ptable">
+  // Summary line
+  const lmCount = lmChurners.length;
+  const lyCount = lyChurners.filter(c => !lmChurners.find(l => l.name === c.name)).length;
+  const summaryHtml = `<div style="padding:12px 18px;font-size:12px;color:var(--ink-soft);border-bottom:1px solid var(--border);display:flex;gap:16px">
+    <span>Comparing vs <strong style="color:var(--ink)">${priorMd ? priorMd.label : '—'}</strong> and <strong style="color:var(--ink)">${lyMd ? lyMd.label : '—'}</strong></span>
+    <span style="color:var(--red)">● ${lmCount} churned since last month</span>
+    <span style="color:var(--amber)">● ${lyCount} active last year, gone now</span>
+  </div>`;
+
+  panel.innerHTML = summaryHtml + `<div style="overflow-x:auto"><table class="ptable">
     <thead><tr>${ths}</tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
+}
+
+
+// ── New Client Cohort Health (NEW LOGIC) ──────────
+// Two cohorts: clients new in LM, clients new in LY same month
+// Check if they're still active in current month
+function renderCohort() {
+  const panel = document.getElementById('cohort-panel');
+  if (!panel || !DATA || !CURRENT_MONTH) return;
+
+  const md      = DATA.months[CURRENT_MONTH]; if (!md) return;
+  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+
+  if (!priorMd && !lyMd) {
+    panel.innerHTML = '<div style="padding:20px 18px;color:var(--ink-soft);font-size:13px">No comparison data available.</div>';
+    return;
+  }
+
+  const currentNames = new Map((md.top_clients || []).map(c => [c.name, c]));
+
+  // All names that appeared in months BEFORE the given refMonth
+  const namesBefore = (beforeKey) => {
+    const s = new Set();
+    DATA.available_months.filter(k => k < beforeKey).forEach(k => {
+      (DATA.months[k]?.top_clients || []).forEach(c => s.add(c.name));
+    });
+    return s;
+  };
+
+  const buildCohort = (refMd, refKey) => {
+    if (!refMd) return { label: '—', clients: [] };
+    const prior = namesBefore(refKey);
+    const newClients = (refMd.top_clients || []).filter(c => !prior.has(c.name));
+    const rows = newClients.map(c => {
+      const curr    = currentNames.get(c.name);
+      const currRev = curr ? r2(curr.del_rev || 0) : 0;
+      const firstRev = r2(c.del_rev || 0);
+      const retained = currRev > 0;
+      const grew     = retained && currRev > firstRev;
+      const growthPct = retained && firstRev > 0
+        ? r2(((currRev - firstRev) / firstRev) * 100) : null;
+      return { name: c.name, bu: c.bu || '—', category: c.category || '—',
+               firstRev, currRev, retained, grew, growthPct };
+    }).sort((a, b) => b.firstRev - a.firstRev);
+    return { label: refMd.label, clients: rows };
+  };
+
+  const lmKey = priorMonthKey(CURRENT_MONTH);
+  const lyKey = lyMonthKey(CURRENT_MONTH);
+  const lmCohort = buildCohort(priorMd, lmKey);
+  const lyCohort = buildCohort(lyMd,    lyKey);
+
+  const renderCohortBlock = (cohort, title, accentColor) => {
+    const { label, clients } = cohort;
+    if (!clients.length) return `
+      <div style="flex:1;min-width:300px">
+        <div style="font-size:12px;font-weight:600;color:${accentColor};margin-bottom:8px;padding:0 4px">${title} · ${label}</div>
+        <div style="padding:16px;color:var(--ink-soft);font-size:12px">No new clients in ${label}.</div>
+      </div>`;
+
+    const total    = clients.length;
+    const retained = clients.filter(c => c.retained).length;
+    const grew     = clients.filter(c => c.grew).length;
+    const churned  = total - retained;
+    const retRate  = Math.round((retained / total) * 100);
+
+    const funnelHtml = `
+      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0 4px">
+        <div style="flex:${grew};background:#10B981"></div>
+        <div style="flex:${retained - grew};background:#3B82F6"></div>
+        <div style="flex:${churned};background:#EF4444;opacity:0.4"></div>
+      </div>
+      <div style="display:flex;gap:10px;font-size:10px;color:var(--ink-soft);margin-bottom:10px">
+        <span>↑ Grew (${grew})</span>
+        <span>→ Flat (${retained - grew})</span>
+        <span>✕ Churned (${churned})</span>
+      </div>`;
+
+    const rowsHtml = clients.map((c, i) => {
+      const buCls = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
+      let statusBadge;
+      if (!c.retained) {
+        statusBadge = `<span style="font-size:10px;font-weight:500;color:var(--red);background:#EF444418;padding:1px 6px;border-radius:8px">✕ Churned</span>`;
+      } else if (c.grew) {
+        statusBadge = `<span style="font-size:10px;font-weight:500;color:var(--green);background:#10B98118;padding:1px 6px;border-radius:8px">↑ Grew</span>`;
+      } else {
+        statusBadge = `<span style="font-size:10px;font-weight:500;color:var(--accent);background:var(--accent-soft);padding:1px 6px;border-radius:8px">→ Flat</span>`;
+      }
+      const growthCell = c.growthPct !== null ? growthBadge(c.growthPct) : '<span style="color:var(--ink-faint)">—</span>';
+      return `<tr>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
+        <td style="font-weight:500;font-size:12px">${c.name}</td>
+        <td><span class="badge ${buCls}" style="font-size:9px">${c.bu}</span></td>
+        <td style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${fmtNum(c.firstRev)} Cr</td>
+        <td style="text-align:right;font-family:var(--mono);font-size:11px">${c.retained ? fmtNum(c.currRev)+' Cr' : '<span style="color:var(--ink-faint)">—</span>'}</td>
+        <td style="text-align:right">${growthCell}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+    }).join('');
+
+    return `
+      <div style="flex:1;min-width:300px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:12px 14px;background:${accentColor}10;border-bottom:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:600;color:${accentColor};text-transform:uppercase;letter-spacing:0.05em">${title}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px">${label} · ${total} new clients</div>
+          <div style="font-size:20px;font-weight:700;color:${retRate >= 60 ? 'var(--green)' : retRate >= 40 ? 'var(--amber)' : 'var(--red)'};margin-top:4px">${retRate}% retained</div>
+          ${funnelHtml}
+        </div>
+        <div style="overflow-x:auto">
+          <table class="ptable" style="font-size:12px">
+            <thead><tr>
+              <th style="min-width:24px">#</th>
+              <th>Client</th>
+              <th>BU</th>
+              <th style="text-align:right;min-width:70px">First Rev</th>
+              <th style="text-align:right;min-width:70px">Now</th>
+              <th style="text-align:right;min-width:60px">Growth</th>
+              <th style="min-width:80px">Status</th>
+            </tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`;
+  };
+
+  panel.innerHTML = `
+    <div style="padding:12px 18px;font-size:12px;color:var(--ink-soft);border-bottom:1px solid var(--border)">
+      Tracking new client retention — who was brand new in <strong style="color:var(--ink)">${lmCohort.label}</strong> and <strong style="color:var(--ink)">${lyCohort.label}</strong>, and are they still active now?
+    </div>
+    <div style="display:flex;gap:14px;padding:14px;flex-wrap:wrap">
+      ${renderCohortBlock(lmCohort, 'Last Month Cohort', '#3B82F6')}
+      ${renderCohortBlock(lyCohort, 'Last Year Same Month Cohort', '#8B5CF6')}
+    </div>`;
 }
 
 // ── Month difference helper ────────────────────────
@@ -2326,7 +2311,7 @@ function openClientDive(clientName) {
       mobile_rev: client ? r2(client.mobile_rev || 0) : 0,
       video_rev:  client ? r2(client.video_rev  || 0) : 0,
       display_rev:client ? r2(client.display_rev|| 0) : 0,
-      booked_rev: client ? r2((client.booked_rev|| 0) / 10000000) : 0,
+      booked_rev: client && client.booked_rev != null ? r2(client.booked_rev) : null,
       bu:         client ? client.bu       : '—',
       category:   client ? client.category : '—',
       agency:     client ? client.agency   : '—',
@@ -2516,13 +2501,13 @@ function buildDataContext() {
   // BU summary — full comparative
   const buSummary = ['LCS1','LCS2','MM1','MM2','Others'].map(function(bu) {
     const b = md.bu[bu] || {};
-    return bu + ': Del Rev ' + fmtNum(b.del_rev) + ' Cr, Booked ' + fmtNum(r2((b.booked_rev||0)/10000000)) + ' Cr, Clients ' + (b.clients||0) + ', vs LM ' + (b.growth_vs_lm ?? '—') + '%, vs LY ' + (b.growth_vs_ly ?? '—') + '%';
+    return bu + ': Del Rev ' + fmtNum(b.del_rev) + ' Cr, Booked ' + (b.booked_rev != null ? fmtNum(b.booked_rev) + ' Cr' : '—') + ', Clients ' + (b.clients||0) + ', vs LM ' + (b.growth_vs_lm ?? '—') + '%, vs LY ' + (b.growth_vs_ly ?? '—') + '%';
   }).join('\n');
 
   // Platform summary — full comparative
   const platSummary = ['CTV','Mobile','Mobile+CTV'].map(function(p) {
     const pl = md.platform[p] || {};
-    return p + ': Del Rev ' + fmtNum(pl.del_rev) + ' Cr, Booked ' + fmtNum(r2((pl.booked_rev||0)/10000000)) + ' Cr, Clients ' + (pl.clients||0) + ', vs LM ' + (pl.growth_vs_lm ?? '—') + '%, vs LY ' + (pl.growth_vs_ly ?? '—') + '%';
+    return p + ': Del Rev ' + fmtNum(pl.del_rev) + ' Cr, Booked ' + (pl.booked_rev != null ? fmtNum(pl.booked_rev) + ' Cr' : '—') + ', Clients ' + (pl.clients||0) + ', vs LM ' + (pl.growth_vs_lm ?? '—') + '%, vs LY ' + (pl.growth_vs_ly ?? '—') + '%';
   }).join('\n');
 
   // Ad Type summary — with vs LM and vs LY
@@ -2537,8 +2522,8 @@ function buildDataContext() {
   const dMom = priorDisplay.del_rev > 0 ? r2(((displayData.del_rev - priorDisplay.del_rev) / priorDisplay.del_rev) * 100) : null;
   const dLy  = lyDisplay.del_rev    > 0 ? r2(((displayData.del_rev - lyDisplay.del_rev)    / lyDisplay.del_rev)    * 100) : null;
   const adTypeSummary =
-    'Video: Del Rev ' + fmtNum(videoData.del_rev) + ' Cr, Booked ' + fmtNum(r2((videoData.booked_rev||0)/10000000)) + ' Cr, vs LM ' + (vMom ?? '—') + '%, vs LY ' + (vLy ?? '—') + '%\n' +
-    'Display: Del Rev ' + fmtNum(displayData.del_rev) + ' Cr, Booked ' + fmtNum(r2((displayData.booked_rev||0)/10000000)) + ' Cr, vs LM ' + (dMom ?? '—') + '%, vs LY ' + (dLy ?? '—') + '%';
+    'Video: Del Rev ' + fmtNum(videoData.del_rev) + ' Cr, Booked ' + (videoData.booked_rev != null ? fmtNum(videoData.booked_rev) + ' Cr' : '—') + ', vs LM ' + (vMom ?? '—') + '%, vs LY ' + (vLy ?? '—') + '%\n' +
+    'Display: Del Rev ' + fmtNum(displayData.del_rev) + ' Cr, Booked ' + (displayData.booked_rev != null ? fmtNum(displayData.booked_rev) + ' Cr' : '—') + ', vs LM ' + (dMom ?? '—') + '%, vs LY ' + (dLy ?? '—') + '%';
 
   // Categories — with vs LM and vs LY
   const catSummary = (md.categories || []).slice(0,10).map(function(c,i) {
@@ -2562,7 +2547,7 @@ function buildDataContext() {
   const clientSummary = (md.top_clients || []).slice(0,20).map(function(c,i) {
     const priorClient = ((priorMd && priorMd.top_clients) || []).find(function(x){return x.name===c.name;});
     const momPct = priorClient && priorClient.del_rev > 0 ? r2(((c.del_rev - priorClient.del_rev)/priorClient.del_rev)*100) : null;
-    return (i+1) + '. ' + c.name + ' (' + c.bu + ') — Del Rev ' + fmtNum(c.del_rev) + ' Cr, Booked ' + fmtNum(r2((c.booked_rev||0)/10000000)) + ' Cr, vs LM: ' + (momPct !== null ? (momPct > 0 ? '+' : '') + momPct + '%' : '—') + ', Category: ' + (c.category||'—') + ', Agency: ' + (c.agency||'—');
+    return (i+1) + '. ' + c.name + ' (' + c.bu + ') — Del Rev ' + fmtNum(c.del_rev) + ' Cr, Booked ' + (c.booked_rev != null ? fmtNum(c.booked_rev) + ' Cr' : '—') + ', vs LM: ' + (momPct !== null ? (momPct > 0 ? '+' : '') + momPct + '%' : '—') + ', Category: ' + (c.category||'—') + ', Agency: ' + (c.agency||'—');
   }).join('\n');
 
   // Overall
@@ -2667,7 +2652,7 @@ async function briefMe() {
   const nextMKey    = nextMonthKey(CURRENT_MONTH);
   const nextMd      = DATA.months[nextMKey] || null;
   const nextBooked  = nextMd
-    ? r2(['LCS1','LCS2','MM1','MM2'].reduce((t, bu) => t + (nextMd.bu[bu] ? (nextMd.bu[bu].booked_rev || 0) / 10000000 : 0), 0))
+    ? r2(['LCS1','LCS2','MM1','MM2'].reduce((t, bu) => t + (nextMd.bu[bu] && nextMd.bu[bu].booked_rev != null ? nextMd.bu[bu].booked_rev : 0), 0))
     : null;
 
   const briefPrompt = `You are a senior Revenue Intelligence Analyst at JioStar, India's leading digital streaming platform. 
@@ -3153,7 +3138,7 @@ function initScrollSpy() {
   }, { passive: true });
 }
 // ── Formatters ────────────────────────────────────
-function fmtNum(n){const v=Number(n)||0; return v>=5?v.toFixed(1):v.toFixed(2);}
+function fmtNum(n){const v=Number(n)||0; return v.toFixed(1);}
 function fmtInt(n){return Math.round(Number(n)||0).toLocaleString('en-IN');}
 function r2(n) { return Math.round((Number(n)||0)*100)/100; }
 function priorMonthKey(yyyymm) {
