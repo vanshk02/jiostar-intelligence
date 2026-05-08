@@ -412,12 +412,17 @@ function renderAll() {
 function renderHeader(md) {
   document.getElementById('page-title').textContent = md.label;
   document.getElementById('page-sub').textContent = 'Revenue Intelligence · JioStar';
-  let meta = fmtInt(md.total_clients) + ' active clients';
+  const colOf = p => p > 0 ? 'var(--green)' : p < 0 ? 'var(--red)' : 'var(--ink-soft)';
+  let metaHtml = `<span>${fmtInt(md.total_clients)} active clients</span>`;
   if (md.vs_prior_month && md.vs_prior_month.change_pct !== null) {
     const p = md.vs_prior_month.change_pct;
-    meta += '  ·  ' + (p>=0?'+':'') + p + '% vs ' + md.vs_prior_month.label;
+    metaHtml += ` <span style="color:var(--ink-faint)">·</span> <span style="color:${colOf(p)}">Del Rev ${p>=0?'+':''}${p}% vs ${md.vs_prior_month.label}</span>`;
   }
-  document.getElementById('topbar-meta').textContent = meta;
+  if (md.vs_last_year && md.vs_last_year.change_pct !== null) {
+    const p = md.vs_last_year.change_pct;
+    metaHtml += ` <span style="color:var(--ink-faint)">·</span> <span style="color:${colOf(p)}">Del Rev ${p>=0?'+':''}${p}% vs ${md.vs_last_year.label}</span>`;
+  }
+  document.getElementById('topbar-meta').innerHTML = metaHtml;
 }
 
 // ── KPI Cards ─────────────────────────────────────
@@ -514,22 +519,61 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     displayRev = r2(filteredClients.reduce((t,c) => t + (c.display_rev ?? 0), 0));
   }
 
-  // ── Biggest Mover ──────────────────────────────────────────
-  const buMovers = ['LCS1','LCS2','MM1','MM2'].map(bu => {
-    const curr  = md.bu[bu] ? md.bu[bu].del_rev : 0;
-    const prior = priorMd && priorMd.bu[bu] ? priorMd.bu[bu].del_rev : 0;
-    const pct   = prior > 0 ? r2(((curr - prior) / prior) * 100) : null;
-    return { name: bu, type: 'BU', delta: r2(curr - prior), pct };
-  });
-  const catMovers = (md.categories || []).slice(0, 8).map(cat => {
-    const prior    = (priorMd?.categories || []).find(c => c.name === cat.name);
-    const priorRev = prior ? prior.del_rev : 0;
-    const delta    = r2(cat.del_rev - priorRev);
-    const pct      = priorRev > 0 ? r2(((cat.del_rev - priorRev) / priorRev) * 100) : null;
-    return { name: cat.name, type: 'Category', delta, pct };
-  });
-  const allMovers = [...buMovers, ...catMovers].filter(m => m.delta !== 0).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-  const topMover  = allMovers[0] || null;
+  // ── Biggest Mover — fully filter-aware ────────────────────────
+  const MAIN_BUS_M = new Set(['LCS1','LCS2','MM1','MM2']);
+
+  // Step 1: Build filtered client pool for any month
+  // Applies BU + Category + Agency filters (Platform/AdType/Format handled by getMoverRev)
+  const buildMoverPool = (monthData) => {
+    if (!monthData) return [];
+    let cs = (monthData.top_clients || []).slice();
+    cs = filterClientsByBU(cs, CURRENT_BU);
+    if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c => c.category === CURRENT_CATEGORY);
+    if (CURRENT_AGENCY   !== 'all') cs = cs.filter(c => c.agency   === CURRENT_AGENCY);
+    return cs;
+  };
+
+  // Step 2: Revenue for a client under current Platform/AdType/Format filters
+  // clientRevForFilters is already defined above — reuse it directly
+  const getMoverRev = clientRevForFilters;
+
+  const moverCurr  = buildMoverPool(md);
+  const moverPrior = buildMoverPool(priorMd);
+  const priorRevMap = Object.fromEntries(moverPrior.map(c => [c.name, getMoverRev(c)]));
+  const pickTop = arr => arr.filter(m => m.delta !== 0).sort((a,b) => Math.abs(b.delta)-Math.abs(a.delta))[0] || null;
+
+  // BU: show "—" when a specific BU filter is active (no cross-BU comparison possible)
+  // Otherwise: group filtered pool by BU, compare delta
+  const topBUMover = CURRENT_BU !== 'all' ? null : (() => {
+    const buRev = (pool, buName) => r2(
+      (buName === 'Others'
+        ? pool.filter(c => !MAIN_BUS_M.has(c.bu))
+        : pool.filter(c => c.bu === buName)
+      ).reduce((t, c) => t + getMoverRev(c), 0)
+    );
+    return pickTop(['LCS1','LCS2','MM1','MM2','Others'].map(bu => {
+      const cR = buRev(moverCurr, bu), pR = buRev(moverPrior, bu);
+      return { name: bu, delta: r2(cR - pR), pct: pR > 0 ? r2(((cR-pR)/pR)*100) : null };
+    }));
+  })();
+
+  // Client: always shown — respects every active filter simultaneously
+  const topClientMover = pickTop(moverCurr.map(c => {
+    const cR = getMoverRev(c), pR = priorRevMap[c.name] ?? 0;
+    return { name: c.name, delta: r2(cR - pR), pct: pR > 0 ? r2(((cR-pR)/pR)*100) : null };
+  }));
+
+  // Category: show "—" when category filter is active
+  // Otherwise: group filtered pool by category, compare delta
+  const topCatMover = CURRENT_CATEGORY !== 'all' ? null : (() => {
+    const cCat = {}, pCat = {};
+    moverCurr.forEach(c  => { if (c.category) cCat[c.category] = (cCat[c.category]||0) + getMoverRev(c); });
+    moverPrior.forEach(c => { if (c.category) pCat[c.category] = (pCat[c.category]||0) + getMoverRev(c); });
+    return pickTop(Object.keys(cCat).map(cat => {
+      const cR = cCat[cat], pR = pCat[cat] ?? 0;
+      return { name: cat, delta: r2(cR - pR), pct: pR > 0 ? r2(((cR-pR)/pR)*100) : null };
+    }));
+  })();
 
   // ── eCPM Card ──────────────────────────────────────────────
   const ecpmVal   = computeEcpm(md);
@@ -541,15 +585,101 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
   const ecpmLyPct  = (ecpmVal !== null && lyEcpm    !== null && lyEcpm    > 0)
     ? r2(((ecpmVal - lyEcpm)    / lyEcpm)    * 100) : null;
 
-  // CTV/Mobile vs LM
-  const ctvPrior    = !anyFilterActive && priorMd && md.platform['CTV']    ? priorMd.platform['CTV']?.del_rev    : null;
-  const mobPrior    = !anyFilterActive && priorMd && md.platform['Mobile'] ? priorMd.platform['Mobile']?.del_rev : null;
-  const ctvMomPct   = ctvPrior > 0 ? r2(((adjCTV    - ctvPrior) / ctvPrior) * 100) : null;
-  const mobMomPct   = mobPrior > 0 ? r2(((adjMobile - mobPrior) / mobPrior) * 100) : null;
-  const ctvMomC     = ctvMomPct !== null ? { pct: ctvMomPct, label: 'vs ' + (priorMd?.label || 'LM') } : null;
-  const mobMomC     = mobMomPct !== null ? { pct: mobMomPct, label: 'vs ' + (priorMd?.label || 'LM') } : null;
+  // ── Filter-aware comparison helpers ─────────────────────────────────────────
+  const lyMd  = DATA.months[lyMonthKey(CURRENT_MONTH)] || null;
+  const lmLbl = priorMd?.label || 'LM';
+  const lyLbl = lyMd?.label    || 'LY';
 
-  // Video/Display share
+  // Apply BU + Category + Agency filters to any month's client pool
+  // Platform/AdType/Format are applied via clientRevForFilters when summing revenue
+  const getFilteredPool = (monthData) => {
+    if (!monthData) return [];
+    let cs = (monthData.top_clients || []).slice();
+    cs = filterClientsByBU(cs, CURRENT_BU);
+    if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c =>
+      c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+    if (CURRENT_AGENCY !== 'all') cs = cs.filter(c =>
+      c.agency === CURRENT_AGENCY || (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY] > 0));
+    return cs;
+  };
+  const priorPool = getFilteredPool(priorMd);
+  const lyPool    = getFilteredPool(lyMd);
+
+  // ── Issue 2: Total Del Rev — filter-aware LM + LY comparisons ────────────────
+  const priorRevF = priorMd
+    ? (!anyFilterActive ? priorMd.total_del_rev : r2(priorPool.reduce((t,c) => t + clientRevForFilters(c), 0)))
+    : null;
+  const lyRevF = lyMd
+    ? (!anyFilterActive ? lyMd.total_del_rev    : r2(lyPool.reduce((t,c)    => t + clientRevForFilters(c), 0)))
+    : null;
+  const revMomPct = priorRevF !== null && priorRevF > 0 ? r2(((totalRev - priorRevF) / priorRevF) * 100) : null;
+  const revLyPct  = lyRevF    !== null && lyRevF    > 0 ? r2(((totalRev - lyRevF)    / lyRevF)    * 100) : null;
+  const revMomC   = revMomPct !== null ? { pct: revMomPct, label: 'vs ' + lmLbl } : null;
+  const revLyC    = revLyPct  !== null ? { pct: revLyPct,  label: 'vs ' + lyLbl  } : null;
+
+  // ── Issue 1: Active Clients — filter-aware CLIENT COUNT comparisons ─────────
+  const priorClientCount = priorMd
+    ? (!anyFilterActive ? priorMd.total_clients : priorPool.filter(c => clientRevForFilters(c) > 0).length)
+    : null;
+  const lyClientCount = lyMd
+    ? (!anyFilterActive ? lyMd.total_clients    : lyPool.filter(c    => clientRevForFilters(c) > 0).length)
+    : null;
+  const clientMomPct = priorClientCount !== null && priorClientCount > 0 ? r2(((totalClients - priorClientCount) / priorClientCount) * 100) : null;
+  const clientLyPct  = lyClientCount    !== null && lyClientCount    > 0 ? r2(((totalClients - lyClientCount)    / lyClientCount)    * 100) : null;
+  const clientMomC   = clientMomPct !== null ? { pct: clientMomPct, label: 'vs ' + lmLbl } : null;
+  const clientLyC    = clientLyPct  !== null ? { pct: clientLyPct,  label: 'vs ' + lyLbl  } : null;
+
+  // ── Issue 3: CTV / Mobile — filter-aware, both LM and LY ────────────────────
+  const getPlatRev = (pool, monthData) => {
+    if (!monthData) return { ctv: null, mobile: null };
+    if (!anyFilterActive) {
+      const pC  = monthData.platform['CTV']        ? monthData.platform['CTV'].del_rev        : 0;
+      const pM  = monthData.platform['Mobile']     ? monthData.platform['Mobile'].del_rev     : 0;
+      const pMC = monthData.platform['Mobile+CTV'] ? monthData.platform['Mobile+CTV'].del_rev : 0;
+      const tot = pC + pM; const cR = tot > 0 ? pC/tot : 0.5; const mR = tot > 0 ? pM/tot : 0.5;
+      return { ctv: r2(pC + pMC*cR), mobile: r2(pM + pMC*mR) };
+    }
+    const pC  = r2(pool.reduce((t,c) => t + (c.ctv_rev       ?? 0), 0));
+    const pM  = r2(pool.reduce((t,c) => t + (c.mobile_rev    ?? 0), 0));
+    const pMC = r2(pool.reduce((t,c) => t + (c.mobilectv_rev ?? 0), 0));
+    const tot = pC + pM; const cR = tot > 0 ? pC/tot : 0.5; const mR = tot > 0 ? pM/tot : 0.5;
+    return { ctv: r2(pC + pMC*cR), mobile: r2(pM + pMC*mR) };
+  };
+  const priorPlat = getPlatRev(priorPool, priorMd);
+  const lyPlat    = getPlatRev(lyPool,    lyMd);
+  const ctvMomPct  = priorPlat.ctv    !== null && priorPlat.ctv    > 0 ? r2(((adjCTV    - priorPlat.ctv)    / priorPlat.ctv)    * 100) : null;
+  const mobMomPct  = priorPlat.mobile !== null && priorPlat.mobile > 0 ? r2(((adjMobile - priorPlat.mobile) / priorPlat.mobile) * 100) : null;
+  const ctvLyPct   = lyPlat.ctv       !== null && lyPlat.ctv       > 0 ? r2(((adjCTV    - lyPlat.ctv)       / lyPlat.ctv)       * 100) : null;
+  const mobLyPct   = lyPlat.mobile    !== null && lyPlat.mobile    > 0 ? r2(((adjMobile - lyPlat.mobile)    / lyPlat.mobile)    * 100) : null;
+  const ctvMomC    = ctvMomPct !== null ? { pct: ctvMomPct, label: 'vs ' + lmLbl } : null;
+  const mobMomC    = mobMomPct !== null ? { pct: mobMomPct, label: 'vs ' + lmLbl } : null;
+  const ctvLyC     = ctvLyPct  !== null ? { pct: ctvLyPct,  label: 'vs ' + lyLbl  } : null;
+  const mobLyC     = mobLyPct  !== null ? { pct: mobLyPct,  label: 'vs ' + lyLbl  } : null;
+
+  // ── Issue 4: Video / Display — filter-aware, both LM and LY ─────────────────
+  const getAdTypeRev = (pool, monthData) => {
+    if (!monthData) return { video: null, display: null };
+    if (!anyFilterActive) return {
+      video:   monthData.ad_type?.Video?.del_rev   ?? null,
+      display: monthData.ad_type?.Display?.del_rev ?? null
+    };
+    return {
+      video:   r2(pool.reduce((t,c) => t + (c.video_rev   ?? 0), 0)),
+      display: r2(pool.reduce((t,c) => t + (c.display_rev ?? 0), 0))
+    };
+  };
+  const priorAT = getAdTypeRev(priorPool, priorMd);
+  const lyAT    = getAdTypeRev(lyPool,    lyMd);
+  const vidMomPct  = priorAT.video   !== null && priorAT.video   > 0 ? r2(((videoRev   - priorAT.video)   / priorAT.video)   * 100) : null;
+  const dispMomPct = priorAT.display !== null && priorAT.display > 0 ? r2(((displayRev - priorAT.display) / priorAT.display) * 100) : null;
+  const vidLyPct   = lyAT.video      !== null && lyAT.video      > 0 ? r2(((videoRev   - lyAT.video)      / lyAT.video)      * 100) : null;
+  const dispLyPct  = lyAT.display    !== null && lyAT.display    > 0 ? r2(((displayRev - lyAT.display)    / lyAT.display)    * 100) : null;
+  const vidMomC    = vidMomPct  !== null ? { pct: vidMomPct,  label: 'vs ' + lmLbl } : null;
+  const dispMomC   = dispMomPct !== null ? { pct: dispMomPct, label: 'vs ' + lmLbl } : null;
+  const vidLyC     = vidLyPct   !== null ? { pct: vidLyPct,   label: 'vs ' + lyLbl  } : null;
+  const dispLyC    = dispLyPct  !== null ? { pct: dispLyPct,  label: 'vs ' + lyLbl  } : null;
+
+  // Video/Display share (unchanged)
   const totalRevForShare = videoRev + displayRev || 1;
   const videoPct   = Math.round((videoRev   / totalRevForShare) * 100);
   const displayPct = Math.round((displayRev / totalRevForShare) * 100);
@@ -560,22 +690,41 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     `<div class="kpi-card">
       <div class="kpi-label">Total Del Rev</div>
       <div class="kpi-value">${fmtNum(totalRev)}<span class="kpi-unit"> Cr</span></div>
-      ${momC ? `<div class="kpi-change ${momC.pct>0?'up':momC.pct<0?'down':'flat'}">${momC.pct>0?'↑':momC.pct<0?'↓':'→'} ${momC.pct>0?'+':''}${Math.abs(momC.pct)}% <span style="color:var(--ink-soft);font-size:11px">${momC.label}</span></div>` : ''}
-      ${lyC  ? `<div class="kpi-change ${lyC.pct>0?'up':lyC.pct<0?'down':'flat'}">${lyC.pct>0?'↑':lyC.pct<0?'↓':'→'} ${lyC.pct>0?'+':''}${Math.abs(lyC.pct)}% <span style="color:var(--ink-soft);font-size:11px">${lyC.label}</span></div>` : ''}
+      ${revMomC ? `<div class="kpi-change ${revMomC.pct>0?'up':revMomC.pct<0?'down':'flat'}">${revMomC.pct>0?'↑':revMomC.pct<0?'↓':'→'} ${revMomC.pct>0?'+':''}${Math.abs(revMomC.pct)}% <span style="color:var(--ink-soft);font-size:11px">${revMomC.label}</span></div>` : ''}
+      ${revLyC  ? `<div class="kpi-change ${revLyC.pct>0?'up':revLyC.pct<0?'down':'flat'}">${revLyC.pct>0?'↑':revLyC.pct<0?'↓':'→'} ${revLyC.pct>0?'+':''}${Math.abs(revLyC.pct)}% <span style="color:var(--ink-soft);font-size:11px">${revLyC.label}</span></div>` : ''}
     </div>`,
-    kpiCard('Active Clients', totalClients,  '',   lyC),
-    kpiCard('CTV Rev',        adjCTV,        'Cr', ctvMomC,  ctvMomC  ? null : 'incl. Mob+CTV split'),
-    kpiCard('Mobile Rev',     adjMobile,     'Cr', mobMomC,  mobMomC  ? null : 'incl. Mob+CTV split'),
-    kpiCard('Video Rev',      videoRev,      'Cr', null,     videoPct + '% of total ad rev'),
-    kpiCard('Display Rev',    displayRev,    'Cr', null,     displayPct + '% of total ad rev'),
-    topMover
-      ? `<div class="kpi-card">
-          <div class="kpi-label">Biggest mover this month</div>
-          <div style="font-size:22px;font-weight:600;color:var(--ink);letter-spacing:-0.02em;margin:6px 0 6px;line-height:1.2">${topMover.name}</div>
-          <div style="font-size:13px;font-family:var(--mono);font-weight:500;color:${topMover.delta >= 0 ? 'var(--green)' : 'var(--red)'}">${topMover.delta >= 0 ? '+' : ''}${fmtNum(topMover.delta)} Cr vs last month</div>
-          <div style="font-size:11px;color:var(--ink-soft);margin-top:3px">${topMover.type} · largest absolute gain</div>
-        </div>`
-      : kpiCard('Biggest mover', 0, 'Cr', null, 'No prior month data'),
+    `<div class="kpi-card">
+      <div class="kpi-label">Active Clients</div>
+      <div class="kpi-value">${fmtInt(totalClients)}<span class="kpi-unit"> </span></div>
+      ${clientMomC ? `<div class="kpi-change ${clientMomC.pct>0?'up':clientMomC.pct<0?'down':'flat'}">${clientMomC.pct>0?'↑':clientMomC.pct<0?'↓':'→'} ${clientMomC.pct>0?'+':''}${Math.abs(clientMomC.pct)}% <span style="color:var(--ink-soft);font-size:11px">${clientMomC.label}</span></div>` : ''}
+      ${clientLyC  ? `<div class="kpi-change ${clientLyC.pct>0?'up':clientLyC.pct<0?'down':'flat'}">${clientLyC.pct>0?'↑':clientLyC.pct<0?'↓':'→'} ${clientLyC.pct>0?'+':''}${Math.abs(clientLyC.pct)}% <span style="color:var(--ink-soft);font-size:11px">${clientLyC.label}</span></div>` : ''}
+    </div>`,
+    kpiCard('CTV Rev',        adjCTV,        'Cr', ctvMomC,  ctvMomC  ? null : 'incl. Mob+CTV split', ctvLyC),
+    kpiCard('Mobile Rev',     adjMobile,     'Cr', mobMomC,  mobMomC  ? null : 'incl. Mob+CTV split', mobLyC),
+    kpiCard('Video Rev',      videoRev,      'Cr', vidMomC,  vidMomC  ? null : videoPct  + '% of total ad rev', vidLyC),
+    kpiCard('Display Rev',    displayRev,    'Cr', dispMomC, dispMomC ? null : displayPct + '% of total ad rev', dispLyC),
+    `<div class="kpi-card">
+      <div class="kpi-label">Biggest Mover vs Last Month</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+        ${[
+          {label:'BU',       mover: topBUMover},
+          {label:'Client',   mover: topClientMover},
+          {label:'Category', mover: topCatMover},
+        ].map(({label, mover}) => mover
+          ? `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:var(--surface);border-radius:7px;gap:6px">
+               <div style="display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden">
+                 <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);flex-shrink:0">${label}</span>
+                 <span style="font-size:12px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${mover.name}">${mover.name}</span>
+               </div>
+               <span style="font-family:var(--mono);font-size:11px;font-weight:600;flex-shrink:0;color:${mover.delta>=0?'var(--green)':'var(--red)'}">${mover.delta>=0?'+':''}${fmtNum(mover.delta)} Cr</span>
+             </div>`
+          : `<div style="padding:5px 8px;background:var(--surface);border-radius:7px">
+               <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-right:6px">${label}</span>
+               <span style="font-size:11px;color:var(--ink-soft)">No prior data</span>
+             </div>`
+        ).join('')}
+      </div>
+    </div>`,
     ecpmVal !== null
       ? `<div class="kpi-card">
           <div class="kpi-label">eCPM</div>
@@ -587,10 +736,11 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       : kpiCard('eCPM', 0, '', null, 'No Preroll/Midroll data for this filter'),
   ].join('');
 }
-function kpiCard(label,val,unit,ch,note) {
+function kpiCard(label,val,unit,ch,note,ch2) {
   let c='';
   if(ch){const cls=ch.pct>0?'up':ch.pct<0?'down':'flat';const arr=ch.pct>0?'↑':ch.pct<0?'↓':'→';c=`<div class="kpi-change ${cls}">${arr} ${ch.pct>0?'+':''}${Math.abs(ch.pct)}% <span style="color:var(--ink-soft);font-size:11px">${ch.label}</span></div>`;}
   else if(note){c=`<div class="kpi-change flat">${note}</div>`;}
+  if(ch2){const cls2=ch2.pct>0?'up':ch2.pct<0?'down':'flat';const arr2=ch2.pct>0?'↑':ch2.pct<0?'↓':'→';c+=`<div class="kpi-change ${cls2}">${arr2} ${ch2.pct>0?'+':''}${Math.abs(ch2.pct)}% <span style="color:var(--ink-soft);font-size:11px">${ch2.label}</span></div>`;}
   return `<div class="kpi-card"><div class="kpi-label">${label}</div><div class="kpi-value">${unit===''?fmtInt(val):fmtNum(val)}<span class="kpi-unit"> ${unit}</span></div>${c}</div>`;
 }
 function computeEcpm(md) {
@@ -1626,7 +1776,33 @@ function renderCategories(md) {
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
   </tr>`;
 
-  document.getElementById('category-panel').innerHTML = ptable(headers, rows + totalRow);
+  let untaggedCatHtml = '';
+  if (CURRENT_CATEGORY === 'all') {
+    const grandTotalCat = !anyFilterActive
+      ? md.total_del_rev
+      : r2(getBaseClients(md).reduce((t, c) => t + clientRevForFilters(c), 0));
+    const taggedCatSum   = allRevs.reduce((t, d) => t + d.rev, 0);
+    const untaggedCatRev = r2(grandTotalCat - taggedCatSum);
+    if (untaggedCatRev > 0.01) {
+      const untaggedCatShare   = grandTotalCat > 0 ? Math.round((untaggedCatRev / grandTotalCat) * 100) : 0;
+      const knownCats          = new Set(catList.map(c => c.name));
+      const untaggedCatClients = (md.top_clients || []).filter(c => c.del_rev > 0 && (!c.category || !knownCats.has(c.category))).length;
+      untaggedCatHtml = `<tr style="background:var(--amber-soft)">
+        <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${catList.length + 1}</td>
+        <td style="font-weight:500;color:var(--amber);font-style:italic">
+          Untagged
+          <span style="font-size:10px;font-weight:600;background:var(--amber);color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px">No Category</span>
+        </td>
+        <td style="text-align:right;font-family:var(--mono);font-weight:500;color:var(--amber)">${fmtNum(untaggedCatRev)} Cr</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
+        <td style="text-align:right;color:var(--ink-soft)">${untaggedCatClients || '—'}</td>
+        <td style="text-align:right;color:var(--ink-soft)">${untaggedCatShare}%</td>
+      </tr>`;
+    }
+  }
+  document.getElementById('category-panel').innerHTML = ptable(headers, rows + untaggedCatHtml + totalRow);
 }
 
 // ── Agencies ──────────────────────────────────────
@@ -1797,7 +1973,33 @@ function renderAgencies(md) {
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
   </tr>`;
 
-  document.getElementById('agency-panel').innerHTML = ptable(headers, rows + totalRow);
+  let untaggedAgHtml = '';
+  if (CURRENT_AGENCY === 'all') {
+    const grandTotalAg = !anyFilterActive
+      ? md.total_del_rev
+      : r2(getBaseClients(md).reduce((t, c) => t + clientRevForFilters(c), 0));
+    const taggedAgSum   = allRevs.reduce((t, d) => t + d.rev, 0);
+    const untaggedAgRev = r2(grandTotalAg - taggedAgSum);
+    if (untaggedAgRev > 0.01) {
+      const untaggedAgShare   = grandTotalAg > 0 ? Math.round((untaggedAgRev / grandTotalAg) * 100) : 0;
+      const knownAgs          = new Set(agList.map(a => a.name));
+      const untaggedAgClients = (md.top_clients || []).filter(c => c.del_rev > 0 && (!c.agency || !knownAgs.has(c.agency))).length;
+      untaggedAgHtml = `<tr style="background:var(--amber-soft)">
+        <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${agList.length + 1}</td>
+        <td style="font-weight:500;color:var(--amber);font-style:italic">
+          Untagged
+          <span style="font-size:10px;font-weight:600;background:var(--amber);color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px">No Agency</span>
+        </td>
+        <td style="text-align:right;font-family:var(--mono);font-weight:500;color:var(--amber)">${fmtNum(untaggedAgRev)} Cr</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
+        <td style="text-align:right;color:var(--ink-soft)">${untaggedAgClients || '—'}</td>
+        <td style="text-align:right;color:var(--ink-soft)">${untaggedAgShare}%</td>
+      </tr>`;
+    }
+  }
+  document.getElementById('agency-panel').innerHTML = ptable(headers, rows + untaggedAgHtml + totalRow);
 }
 
 // ── Top Clients ───────────────────────────────────
