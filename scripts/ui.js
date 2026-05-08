@@ -985,7 +985,10 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       ? `<div class="kpi-card">
           <div class="kpi-label">eCPM</div>
           <div class="kpi-value">₹${fmtNum(ecpmVal)}<span class="kpi-unit"> </span></div>
-          <div style="font-size:11px;color:var(--ink-soft);margin-bottom:4px">Preroll + Midroll · excl. Mediation</div>
+          <div style="font-size:11px;color:var(--ink-soft);margin-bottom:4px">
+  ${CURRENT_FORMAT === 'Preroll' ? 'Preroll only' : CURRENT_FORMAT === 'Midroll' ? 'Midroll only' : 'Preroll + Midroll'} · excl. Mediation
+  ${(CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all') ? '<span style="color:var(--amber);margin-left:4px" title="eCPM data is not broken down by Category or Agency">⚠ Cat/Agency filter not applied</span>' : ''}
+</div>
           ${ecpmMomPct !== null ? `<div class="kpi-change ${ecpmMomPct>=0?'up':'down'}">${ecpmMomPct>=0?'↑':'↓'} ${Math.abs(ecpmMomPct)}% <span style="color:var(--ink-soft);font-size:11px">vs ${DATA.months[priorMonthKey(CURRENT_MONTH)]?.label||'LM'}</span></div>` : ''}
           ${ecpmLyPct  !== null ? `<div class="kpi-change ${ecpmLyPct>=0?'up':'down'}">${ecpmLyPct>=0?'↑':'↓'} ${Math.abs(ecpmLyPct)}% <span style="color:var(--ink-soft);font-size:11px">vs ${DATA.months[lyMonthKey(CURRENT_MONTH)]?.label||'LY'}</span></div>` : ''}
         </div>`
