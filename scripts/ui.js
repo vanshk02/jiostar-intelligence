@@ -1004,38 +1004,64 @@ function kpiCard(label,val,unit,ch,note,ch2) {
 }
 function computeEcpm(md) {
   if (!md || !md.ecpm_data || !md.ecpm_data.rows) return null;
- 
-  // eCPM not applicable for Display or non-video formats
   if (CURRENT_ADTYPE === 'Display') return null;
   if (CURRENT_FORMAT !== 'all' && !['Preroll','Midroll'].includes(CURRENT_FORMAT)) return null;
- 
-  let rows = md.ecpm_data.rows;
- 
-  // Apply BU filter
-  if (CURRENT_BU !== 'all') {
-    if (CURRENT_BU === 'Others') {
-      const MAIN = new Set(['LCS1','LCS2','MM1','MM2']);
-      rows = rows.filter(r => !MAIN.has(r.bu));
-    } else {
-      rows = rows.filter(r => r.bu === CURRENT_BU);
+
+  const needsClientPool = CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all';
+
+  if (!needsClientPool) {
+    // Fast path — use pre-aggregated ecpm_data rows
+    let rows = md.ecpm_data.rows;
+    if (CURRENT_BU !== 'all') {
+      if (CURRENT_BU === 'Others') {
+        const MAIN = new Set(['LCS1','LCS2','MM1','MM2']);
+        rows = rows.filter(r => !MAIN.has(r.bu));
+      } else {
+        rows = rows.filter(r => r.bu === CURRENT_BU);
+      }
     }
+    if (CURRENT_PLATFORM !== 'all') rows = rows.filter(r => r.platform === CURRENT_PLATFORM);
+    if (CURRENT_FORMAT   !== 'all') rows = rows.filter(r => r.format   === CURRENT_FORMAT);
+    if (!rows.length) return null;
+    const totalRevCr = rows.reduce((t, r) => t + r.rev_cr, 0);
+    const totalImp   = rows.reduce((t, r) => t + r.imp,    0);
+    return totalImp > 0 ? r2((totalRevCr * 10000000 / totalImp) * 1000) : null;
   }
- 
-  // Apply Platform filter
-  if (CURRENT_PLATFORM !== 'all') {
-    rows = rows.filter(r => r.platform === CURRENT_PLATFORM);
-  }
- 
-  // Apply Format filter (Preroll / Midroll)
-  if (CURRENT_FORMAT !== 'all') {
-    rows = rows.filter(r => r.format === CURRENT_FORMAT);
-  }
- 
-  if (!rows.length) return null;
- 
-  const totalRevCr = rows.reduce((t, r) => t + r.rev_cr, 0);
-  const totalImp   = rows.reduce((t, r) => t + r.imp,    0);
- 
+
+  // Category/Agency filter active — aggregate from top_clients
+  let clients = (md.top_clients || []).slice();
+  clients = filterClientsByBU(clients, CURRENT_BU);
+  if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
+  if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
+  clients = clients.filter(c => c.bu !== 'Mediation');
+
+  const getImpAndRev = (c) => {
+    const p = CURRENT_PLATFORM, f = CURRENT_FORMAT;
+    if (f === 'Preroll') {
+      if (p === 'CTV')        return { imp: c.ctv_preroll_imp  || 0, rev: c.ctv_preroll_rev  || 0 };
+      if (p === 'Mobile')     return { imp: c.mob_preroll_imp  || 0, rev: c.mob_preroll_rev  || 0 };
+      if (p === 'Mobile+CTV') return { imp: c.mctv_preroll_imp || 0, rev: c.mctv_preroll_rev || 0 };
+      return { imp: c.preroll_imp || 0, rev: c.preroll_rev || 0 };
+    }
+    if (f === 'Midroll') {
+      if (p === 'CTV')        return { imp: c.ctv_midroll_imp  || 0, rev: c.ctv_midroll_rev  || 0 };
+      if (p === 'Mobile')     return { imp: c.mob_midroll_imp  || 0, rev: c.mob_midroll_rev  || 0 };
+      if (p === 'Mobile+CTV') return { imp: c.mctv_midroll_imp || 0, rev: c.mctv_midroll_rev || 0 };
+      return { imp: c.midroll_imp || 0, rev: c.midroll_rev || 0 };
+    }
+    // Preroll + Midroll combined
+    if (p === 'CTV')        return { imp: (c.ctv_preroll_imp  || 0) + (c.ctv_midroll_imp  || 0), rev: (c.ctv_preroll_rev  || 0) + (c.ctv_midroll_rev  || 0) };
+    if (p === 'Mobile')     return { imp: (c.mob_preroll_imp  || 0) + (c.mob_midroll_imp  || 0), rev: (c.mob_preroll_rev  || 0) + (c.mob_midroll_rev  || 0) };
+    if (p === 'Mobile+CTV') return { imp: (c.mctv_preroll_imp || 0) + (c.mctv_midroll_imp || 0), rev: (c.mctv_preroll_rev || 0) + (c.mctv_midroll_rev || 0) };
+    return { imp: (c.preroll_imp || 0) + (c.midroll_imp || 0), rev: (c.preroll_rev || 0) + (c.midroll_rev || 0) };
+  };
+
+  let totalRevCr = 0, totalImp = 0;
+  clients.forEach(c => {
+    const { imp, rev } = getImpAndRev(c);
+    totalRevCr += rev;
+    totalImp   += imp;
+  });
   return totalImp > 0 ? r2((totalRevCr * 10000000 / totalImp) * 1000) : null;
 }
 // ── Shared helpers ────────────────────────────────
