@@ -98,59 +98,315 @@ function renderFlags(md) {
   const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
   const flags = [];
 
-  const classify = (pct, label) => {
+  const classify = (pct, label, type) => {
     if (pct === null || pct === undefined) return;
-    if (pct <= -20)      flags.push({ cls: 'flag-red',   icon: '🔴', text: label + ' ' + pct + '% vs LM' });
-    else if (pct <= -10) flags.push({ cls: 'flag-amber', icon: '🟡', text: label + ' ' + pct + '% vs LM' });
-    else if (pct >= 20)  flags.push({ cls: 'flag-green', icon: '🟢', text: label + ' +' + pct + '% vs LM' });
+    if (pct <= -20)      flags.push({ cls:'flag-red',   icon:'🔴', text: label+' '+pct+'% vs LM',  label, type, pct });
+    else if (pct <= -10) flags.push({ cls:'flag-amber', icon:'🟡', text: label+' '+pct+'% vs LM',  label, type, pct });
+    else if (pct >= 20)  flags.push({ cls:'flag-green', icon:'🟢', text: label+' +'+pct+'% vs LM', label, type, pct });
   };
 
-  // BU flags
-  ['LCS1','LCS2','MM1','MM2'].forEach(bu => {
-    const b = md.bu[bu] || {};
-    classify(b.growth_vs_lm ?? null, bu);
-  });
+  const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_PLATFORM !== 'all' ||
+    CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' ||
+    CURRENT_ADTYPE !== 'all' || CURRENT_FORMAT !== 'all';
 
-  // Platform flags
-  ['CTV','Mobile','Mobile+CTV'].forEach(p => {
-    const pl = md.platform[p] || {};
-    classify(pl.growth_vs_lm ?? null, p);
-  });
+  // ── Revenue for a client under active platform/adtype filters ──
+  const getClientRev = (c) => {
+    if (CURRENT_PLATFORM === 'CTV')        return c.ctv_rev       ?? 0;
+    if (CURRENT_PLATFORM === 'Mobile')     return c.mobile_rev    ?? 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return c.mobilectv_rev ?? 0;
+    if (CURRENT_ADTYPE   === 'Video')      return c.video_rev     ?? 0;
+    if (CURRENT_ADTYPE   === 'Display')    return c.display_rev   ?? 0;
+    return c.del_rev ?? 0;
+  };
 
-  // Category flags — top 10
-  (md.categories || []).slice(0, 10).forEach(cat => {
-    if (!priorMd) return;
-    const prior = (priorMd.categories || []).find(c => c.name === cat.name);
-    if (!prior || prior.del_rev <= 0) return;
-    const pct = r2(((cat.del_rev - prior.del_rev) / prior.del_rev) * 100);
-    classify(pct, cat.name);
-  });
+  // ── Filtered client pool for any month (BU + Category + Agency) ──
+  const getPool = (monthData) => {
+    if (!monthData) return [];
+    let cs = (monthData.top_clients || []).slice();
+    cs = filterClientsByBU(cs, CURRENT_BU);
+    if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c => c.category === CURRENT_CATEGORY);
+    if (CURRENT_AGENCY   !== 'all') cs = cs.filter(c => c.agency   === CURRENT_AGENCY);
+    return cs;
+  };
 
-  // Agency flags
-  (md.agencies || []).forEach(ag => {
-    if (!priorMd) return;
-    const prior = (priorMd.agencies || []).find(a => a.name === ag.name);
-    if (!prior || prior.del_rev <= 0) return;
-    const pct = r2(((ag.del_rev - prior.del_rev) / prior.del_rev) * 100);
-    classify(pct, ag.name);
-  });
-
-  const row = document.getElementById('flags-row');
-  if (!flags.length) {
-    row.style.display = 'none';
-    return;
+  // ── BU flags — skip if a specific BU is already selected ──────
+  if (CURRENT_BU === 'all') {
+    ['LCS1','LCS2','MM1','MM2'].forEach(bu => {
+      if (!anyFilterActive) {
+        const b = md.bu[bu] || {};
+        classify(b.growth_vs_lm ?? null, bu, 'BU');
+      } else {
+        // Compute BU rev from clients (respects platform/adtype/category/agency filters)
+        const currPool  = getPool(md).filter(c => c.bu === bu);
+        const priorPool = getPool(priorMd).filter(c => c.bu === bu);
+        const currRev   = r2(currPool.reduce((t,c)  => t + getClientRev(c), 0));
+        const priorRev  = r2(priorPool.reduce((t,c) => t + getClientRev(c), 0));
+        const pct = priorRev > 0 ? r2(((currRev - priorRev) / priorRev) * 100) : null;
+        classify(pct, bu, 'BU');
+      }
+    });
   }
 
-  // Sort: red first, amber second, green last
+  // ── Platform flags — skip if a specific platform is already selected ──
+  if (CURRENT_PLATFORM === 'all') {
+    ['CTV','Mobile','Mobile+CTV'].forEach(p => {
+      const platKey = p === 'CTV' ? 'ctv_rev' : p === 'Mobile' ? 'mobile_rev' : 'mobilectv_rev';
+      if (!anyFilterActive) {
+        const pl = md.platform[p] || {};
+        classify(pl.growth_vs_lm ?? null, p, 'Platform');
+      } else {
+        const currPool  = getPool(md);
+        const priorPool = getPool(priorMd);
+        const currRev   = r2(currPool.reduce((t,c)  => t + (c[platKey] ?? 0), 0));
+        const priorRev  = r2(priorPool.reduce((t,c) => t + (c[platKey] ?? 0), 0));
+        const pct = priorRev > 0 ? r2(((currRev - priorRev) / priorRev) * 100) : null;
+        classify(pct, p, 'Platform');
+      }
+    });
+  }
+
+  // ── Category flags — skip if a specific category is already selected ──
+  if (CURRENT_CATEGORY === 'all') {
+    if (!anyFilterActive) {
+      (md.categories || []).slice(0,10).forEach(cat => {
+        if (!priorMd) return;
+        const prior = (priorMd.categories || []).find(c => c.name === cat.name);
+        if (!prior || prior.del_rev <= 0) return;
+        const pct = r2(((cat.del_rev - prior.del_rev) / prior.del_rev) * 100);
+        classify(pct, cat.name, 'Category');
+      });
+    } else {
+      const currPool  = getPool(md);
+      const priorPool = getPool(priorMd);
+      const currCat = {}, priorCat = {};
+      currPool.forEach(c  => { if (c.category) currCat[c.category]  = (currCat[c.category]  || 0) + getClientRev(c); });
+      priorPool.forEach(c => { if (c.category) priorCat[c.category] = (priorCat[c.category] || 0) + getClientRev(c); });
+      Object.entries(currCat).sort((a,b) => b[1]-a[1]).slice(0,10).forEach(([catName, currRev]) => {
+        const priorRev = priorCat[catName] ?? 0;
+        if (priorRev <= 0) return;
+        classify(r2(((currRev - priorRev) / priorRev) * 100), catName, 'Category');
+      });
+    }
+  }
+
+  // ── Agency flags — skip if a specific agency is already selected ──
+  if (CURRENT_AGENCY === 'all') {
+    if (!anyFilterActive) {
+      (md.agencies || []).forEach(ag => {
+        if (!priorMd) return;
+        const prior = (priorMd.agencies || []).find(a => a.name === ag.name);
+        if (!prior || prior.del_rev <= 0) return;
+        const pct = r2(((ag.del_rev - prior.del_rev) / prior.del_rev) * 100);
+        classify(pct, ag.name, 'Agency');
+      });
+    } else {
+      const currPool  = getPool(md);
+      const priorPool = getPool(priorMd);
+      const currAg = {}, priorAg = {};
+      currPool.forEach(c  => { if (c.agency) currAg[c.agency]  = (currAg[c.agency]  || 0) + getClientRev(c); });
+      priorPool.forEach(c => { if (c.agency) priorAg[c.agency] = (priorAg[c.agency] || 0) + getClientRev(c); });
+      Object.entries(currAg).forEach(([agName, currRev]) => {
+        const priorRev = priorAg[agName] ?? 0;
+        if (priorRev <= 0) return;
+        classify(r2(((currRev - priorRev) / priorRev) * 100), agName, 'Agency');
+      });
+    }
+  }
+
+  const row = document.getElementById('flags-row');
+  if (!flags.length) { row.style.display = 'none'; return; }
+
   const order = { 'flag-red': 0, 'flag-amber': 1, 'flag-green': 2 };
   flags.sort((a, b) => order[a.cls] - order[b.cls]);
 
+  const filterLabel = [CURRENT_BU, CURRENT_PLATFORM, CURRENT_ADTYPE, CURRENT_CATEGORY, CURRENT_AGENCY]
+    .filter(v => v !== 'all').join(' · ');
+  const headerText = filterLabel
+    ? '📊 Auto Diagnostics [' + filterLabel + '] — click any flag for client breakdown'
+    : '📊 Auto Diagnostics — click any flag for client breakdown';
+
   row.style.display = 'flex';
-  row.innerHTML =
-    '<div style="width:100%;font-size:11px;font-weight:600;color:var(--ink-soft);letter-spacing:0.05em;text-transform:uppercase;padding-bottom:4px">📊 Auto Diagnostics</div>' +
-    flags.map(f =>
-      '<span class="flag-pill ' + f.cls + '">' + f.icon + ' ' + f.text + '</span>'
-    ).join('');
+  row.innerHTML = '<div style="width:100%;font-size:11px;font-weight:600;color:var(--ink-soft);letter-spacing:0.05em;text-transform:uppercase;padding-bottom:4px">' + headerText + '</div>' +
+    flags.map(function(f) {
+      var safeName = f.label.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      return '<span class="flag-pill ' + f.cls + '" onclick="openDiagDrilldown(\'' + f.type + '\',\'' + safeName + '\',' + f.pct + ')" style="cursor:pointer" title="Click to see who drove this">' + f.icon + ' ' + f.text + ' ↗</span>';
+    }).join('');
+}
+// ── Diagnostic Drill-down ─────────────────────────
+function openDiagDrilldown(type, name, pct) {
+  const md      = DATA.months[CURRENT_MONTH]; if (!md) return;
+  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)]; if (!priorMd) return;
+
+  // Get revenue for a client given entity type
+  const getEntityRev = (c) => {
+    if (type === 'Platform') {
+      if (name === 'CTV')        return c.ctv_rev       ?? 0;
+      if (name === 'Mobile')     return c.mobile_rev    ?? 0;
+      if (name === 'Mobile+CTV') return c.mobilectv_rev ?? 0;
+    }
+    return c.del_rev ?? 0;
+  };
+
+  // Filter clients belonging to this entity
+  const filterForEntity = (clients) => {
+    if (type === 'BU') {
+      if (name === 'Others') return clients.filter(c => !MAIN_BUS.includes(c.bu));
+      return clients.filter(c => c.bu === name);
+    }
+    if (type === 'Platform') return clients; // all clients — we use entity-specific rev field
+    if (type === 'Category') return clients.filter(c => c.category === name);
+    if (type === 'Agency')   return clients.filter(c => c.agency   === name);
+    return clients;
+  };
+
+  const currClients  = filterForEntity(md.top_clients      || []);
+  const priorClients = filterForEntity(priorMd.top_clients || []);
+
+  const currNames  = new Set(currClients.map(c  => c.name));
+  const priorNames = new Set(priorClients.map(c => c.name));
+  const priorRevMap = Object.fromEntries(priorClients.map(c => [c.name, getEntityRev(c)]));
+  // ── Actual entity-level delta from stored data ─────────────
+  let actualCurrRev = null, actualPriorRev = null;
+  if (type === 'BU') {
+    actualCurrRev  = md.bu[name]?.del_rev ?? null;
+    actualPriorRev = priorMd.bu[name]?.del_rev ?? null;
+  } else if (type === 'Platform') {
+    actualCurrRev  = md.platform[name]?.del_rev ?? null;
+    actualPriorRev = priorMd.platform[name]?.del_rev ?? null;
+  } else if (type === 'Category') {
+    actualCurrRev  = (md.categories || []).find(c => c.name === name)?.del_rev ?? null;
+    actualPriorRev = (priorMd.categories || []).find(c => c.name === name)?.del_rev ?? null;
+  } else if (type === 'Agency') {
+    actualCurrRev  = (md.agencies || []).find(a => a.name === name)?.del_rev ?? null;
+    actualPriorRev = (priorMd.agencies || []).find(a => a.name === name)?.del_rev ?? null;
+  }
+  const actualDelta = (actualCurrRev !== null && actualPriorRev !== null)
+    ? r2(actualCurrRev - actualPriorRev) : null;
+
+  // 1. Churned — in prior, not in current
+  const churned = priorClients
+    .filter(c => !currNames.has(c.name) && getEntityRev(c) > 0)
+    .map(c => ({ name: c.name, bu: c.bu || '—', category: c.category || '—', priorRev: getEntityRev(c), currRev: 0, delta: -getEntityRev(c) }))
+    .sort((a, b) => a.delta - b.delta);
+
+  // 2. Declined — in both, revenue went down
+  const declined = currClients
+    .map(c => ({ name: c.name, bu: c.bu || '—', category: c.category || '—', priorRev: priorRevMap[c.name] ?? 0, currRev: getEntityRev(c), delta: r2(getEntityRev(c) - (priorRevMap[c.name] ?? 0)) }))
+    .filter(c => c.delta < -0.01 && c.priorRev > 0)
+    .sort((a, b) => a.delta - b.delta);
+
+  // 3. Grew — in current, revenue went up
+  const grew = currClients
+    .map(c => ({ name: c.name, bu: c.bu || '—', category: c.category || '—', priorRev: priorRevMap[c.name] ?? 0, currRev: getEntityRev(c), delta: r2(getEntityRev(c) - (priorRevMap[c.name] ?? 0)) }))
+    .filter(c => c.delta > 0.01)
+    .sort((a, b) => b.delta - a.delta);
+
+  // 4. New clients (weren't in prior at all)
+  const newClients = currClients
+    .filter(c => !priorNames.has(c.name) && getEntityRev(c) > 0.01)
+    .map(c => ({ name: c.name, bu: c.bu || '—', category: c.category || '—', priorRev: 0, currRev: getEntityRev(c), delta: getEntityRev(c) }))
+    .sort((a, b) => b.delta - a.delta);
+
+  const totalDelta    = r2([...churned, ...declined].reduce((t, c) => t + c.delta, 0));
+  const totalPositive = r2([...grew, ...newClients].reduce((t, c) => t + c.delta, 0));
+  const sign = pct >= 0 ? '+' : '';
+  const pctColor = pct <= -10 ? 'var(--red)' : pct >= 10 ? 'var(--green)' : 'var(--amber)';
+
+  // ── Header ────────────────────────────────────────────────
+  document.getElementById('diag-header').innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div>
+        <div style="font-size:16px;font-weight:600;color:var(--ink)">${name} — Client Breakdown</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:3px">${type} · ${md.label} vs ${priorMd.label}</div>
+        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span style="font-size:13px;font-weight:600;color:${pctColor}">${sign}${pct}% overall</span>
+          ${actualDelta !== null ? `<span style="font-size:12px;font-weight:600;color:${actualDelta>=0?'var(--green)':'var(--red)'};font-family:var(--mono)">${actualDelta>=0?'+':''}${fmtNum(actualDelta)} Cr actual move</span>` : ''}
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--ink-soft);background:var(--surface);padding:5px 8px;border-radius:6px;border:1px solid var(--border)">
+          ⚠️ Breakdown below covers <strong>top clients only</strong> — smaller clients not in the list may account for the remaining gap
+        </div>
+        <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap">
+          ${totalDelta < 0 ? `<span style="font-size:12px;color:var(--red);font-family:var(--mono)">${fmtNum(totalDelta)} Cr from churned + declined (top clients)</span>` : ''}
+          ${totalPositive > 0 ? `<span style="font-size:12px;color:var(--green);font-family:var(--mono)">+${fmtNum(totalPositive)} Cr from grew + new (top clients)</span>` : ''}
+        </div>
+      </div>
+      <button onclick="closeDiagDrilldown()" style="background:none;border:none;font-size:18px;color:var(--ink-soft);cursor:pointer;padding:4px 8px;border-radius:6px;line-height:1">✕</button>
+    </div>`;
+
+  // ── Client table builder ──────────────────────────────────
+  const clientTable = (list, emptyMsg) => {
+    if (!list.length) return `<div style="padding:12px 0;color:var(--ink-soft);font-size:12px">${emptyMsg}</div>`;
+    return `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table class="ptable" style="min-width:480px;width:100%">
+        <thead><tr>
+          <th style="min-width:24px">#</th>
+          <th style="min-width:140px">Client</th>
+          <th style="min-width:50px">BU</th>
+          <th style="text-align:right;min-width:72px">LM Rev</th>
+          <th style="text-align:right;min-width:72px">Now</th>
+          <th style="text-align:right;min-width:72px">Delta</th>
+        </tr></thead>
+        <tbody>
+          ${list.map((c, i) => `<tr>
+            <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
+            <td style="font-weight:500;font-size:12px">${c.name}</td>
+            <td><span class="badge ${({LCS1:'badge-green',LCS2:'badge-blue',MM1:'badge-amber',MM2:'badge-red'}[c.bu]||'badge-gray')}" style="font-size:9px">${c.bu}</span></td>
+            <td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-soft)">${c.priorRev > 0 ? fmtNum(c.priorRev)+' Cr' : '—'}</td>
+            <td style="text-align:right;font-family:var(--mono);font-size:12px">${c.currRev > 0 ? fmtNum(c.currRev)+' Cr' : '<span style="color:var(--ink-faint)">—</span>'}</td>
+            <td style="text-align:right;font-family:var(--mono);font-size:12px;font-weight:600;color:${c.delta>=0?'var(--green)':'var(--red)'}">${c.delta>=0?'+':''}${fmtNum(c.delta)} Cr</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  };
+
+  // ── Section builder ───────────────────────────────────────
+  const section = (icon, title, subtitle, bgColor, list, emptyMsg) => `
+    <div style="margin-top:16px">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:${bgColor};border-radius:8px 8px 0 0;border:1px solid var(--border)">
+        <span style="font-size:14px">${icon}</span>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--ink)">${title} <span style="color:var(--ink-soft);font-weight:400">(${list.length} client${list.length!==1?'s':''})</span></div>
+          ${subtitle ? `<div style="font-size:11px;color:var(--ink-soft)">${subtitle}</div>` : ''}
+        </div>
+      </div>
+      <div style="border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;overflow-x:auto">
+        ${clientTable(list, emptyMsg)}
+      </div>
+    </div>`;
+
+  document.getElementById('diag-content').innerHTML =
+    section('🔴', 'Churned',
+      `Were active in ${priorMd.label}, zero spend this month`,
+      'var(--red-soft)', churned, 'No churned clients — good sign!') +
+
+    section('🟡', 'Declined',
+      `Still active but reduced spend vs ${priorMd.label}`,
+      'var(--amber-soft)', declined, 'No declines — all active clients held or grew.') +
+
+    section('🆕', 'New Clients',
+      `Weren't active in ${priorMd.label}, appeared this month`,
+      'rgba(59,130,246,0.08)', newClients, `No new clients in ${md.label}.`) +
+
+    section('🟢', 'Grew',
+      `Active in both months, revenue increased`,
+      'var(--green-soft)', grew, 'No clients grew — all were flat or declined.');
+
+  // ── Open drawer ───────────────────────────────────────────
+  const overlay = document.getElementById('diag-overlay');
+  const drawer  = document.getElementById('diag-drawer');
+  overlay.style.display = 'block';
+  drawer.style.display  = 'flex';
+  drawer.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDiagDrilldown() {
+  document.getElementById('diag-overlay').style.display = 'none';
+  const drawer = document.getElementById('diag-drawer');
+  drawer.style.display  = 'none';
+  drawer.classList.remove('open');
+  document.body.style.overflow = '';
 }
 let buChart = null;
 let platformChart = null;
