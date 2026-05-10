@@ -1887,12 +1887,16 @@ clients: clientCount,
         if (f === 'all' && fd.rev <= 0) return;
         const isFmtActive = f === 'all' || f === fmt;
         const fmtShare = fd.rev > 0 ? Math.round((fd.rev / shareDenom) * 100) : 0;
+        const fdPrior   = getFormatData(fmt, adType, priorMd);
+        const fdLy      = getFormatData(fmt, adType, lyMd);
+        const fmtMomPct = fdPrior.rev > 0 ? r2(((fd.rev - fdPrior.rev) / fdPrior.rev) * 100) : null;
+        const fmtLoyPct = fdLy.rev    > 0 ? r2(((fd.rev - fdLy.rev)    / fdLy.rev)    * 100) : null;
         rows += `<tr style="${!isFmtActive ? 'opacity:0.3' : ''}">
           <td style="padding-left:24px;color:var(--ink-soft);font-size:12px">${fmt}</td>
           <td style="text-align:right;font-family:var(--mono);font-size:12px">${fmtNum(fd.rev)} Cr</td>
           <td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-soft)">${fd.booked != null ? fmtNum(fd.booked) + ' Cr' : '—'}</td>
-          <td style="text-align:right;color:var(--ink-soft)">—</td>
-          <td style="text-align:right;color:var(--ink-soft)">—</td>
+          <td style="text-align:right;font-size:12px">${growthBadge(fmtMomPct)}</td>
+          <td style="text-align:right;font-size:12px">${growthBadge(fmtLoyPct)}</td>
           <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${fd.clients}</td>
           <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${fmtShare}%</td>
         </tr>`;
@@ -2443,14 +2447,27 @@ function renderClients(md) {
     totalBooked += booked;
 
     const hasBrands = c.brands && c.brands.length > 0;
-    const brandRows = hasBrands ? c.brands.map(b =>
-      `<tr class="brand-row" id="brands-${i}" style="display:none;background:var(--surface)">
+    const priorClientForBrand = (priorMd?.top_clients || []).find(pc => pc.name === c.name);
+    const lyClientForBrand    = (lyMd?.top_clients    || []).find(lc => lc.name === c.name);
+    const brandRows = hasBrands ? c.brands.map(b => {
+      const priorBrand = (priorClientForBrand?.brands || []).find(pb => pb.name === b.name);
+      const lyBrand    = (lyClientForBrand?.brands    || []).find(lb => lb.name === b.name);
+      const bLmRev     = priorBrand ? r2(priorBrand.del_rev || 0) : 0;
+      const bLyRev     = lyBrand    ? r2(lyBrand.del_rev    || 0) : 0;
+      const bMomPct    = bLmRev > 0 ? r2(((b.del_rev - bLmRev) / bLmRev) * 100) : null;
+      const bLoyPct    = bLyRev > 0 ? r2(((b.del_rev - bLyRev) / bLyRev) * 100) : null;
+      const bBooked    = (c.booked_rev != null && c.del_rev > 0 && b.del_rev > 0)
+        ? r2(c.booked_rev * (b.del_rev / c.del_rev)) : null;
+      return `<tr class="brand-row" id="brands-${i}" style="display:none;background:var(--surface)">
         <td></td>
         <td colspan="2" style="padding-left:28px;font-size:11px;color:var(--ink-soft)">↳ ${b.name}</td>
         <td style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${fmtNum(b.del_rev)} Cr</td>
-        <td colspan="5"></td>
-      </tr>`
-    ).join('') : '';
+        <td style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${bBooked != null ? fmtNum(bBooked) + ' Cr' : '—'}</td>
+        <td style="text-align:right;font-size:11px">${growthBadge(bMomPct)}</td>
+        <td style="text-align:right;font-size:11px">${growthBadge(bLoyPct)}</td>
+        <td colspan="8"></td>
+      </tr>`;
+    }).join('') : '';
 
     const expandBtn = hasBrands
       ? `<button onclick="toggleBrands(${i},this)" style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--accent);padding:0 4px;font-family:var(--mono)">+</button>`
@@ -2463,7 +2480,7 @@ function renderClients(md) {
       <td style="font-family:var(--mono);font-weight:500;text-align:right">${fmtNum(rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right">${booked != null ? fmtNum(booked) + ' Cr' : '—'}</td>
       <td style="font-size:12px;color:var(--ink-soft)">${c.category||'—'}</td>
-<td style="font-size:11px">${lyClientNames.has(c.name) ? '<span style="color:var(--green)">🔄 Repeat</span>' : '<span style="color:var(--accent)">🆕 New</span>'}</td>
+<td style="font-size:11px">${lyClientNames.has(c.name) ? '<span style="color:var(--green)">🔄 Retained</span>' : '<span style="color:var(--accent)">🆕 New</span>'}</td>
       <td style="font-size:12px;color:var(--ink-soft)">${c.agency||'—'}</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.video_rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.display_rev)} Cr</td>
@@ -2941,7 +2958,7 @@ function openClientDive(clientName) {
     { label: 'This Month',     val: fmtNum(currentEntry.del_rev || 0) + ' Cr', sub: 'Delivered revenue' },
     { label: 'Peak Month',     val: fmtNum(peakEntry.del_rev || 0) + ' Cr',   sub: peakEntry.label || '—' },
     { label: 'Avg Monthly',    val: fmtNum(avgRev) + ' Cr',                    sub: activeMonths.length + ' active months' },
-    { label: 'First Appeared', val: firstEntry.label || '—',                   sub: 'Earliest month on record' },
+    { label: 'First Appeared', val: firstEntry.label ? (firstEntry.mkey === DATA.available_months[0] ? firstEntry.label + ' <span style="opacity:0.55;font-size:0.82em;font-family:var(--font);font-weight:400">(earlier)</span>' : firstEntry.label) : '—', sub: firstEntry.mkey === DATA.available_months[0] ? "Data starts Apr '24 — client may be older" : 'Earliest month on record' },
   ].map(s => `
     <div class="dive-stat">
       <div class="dive-stat-label">${s.label}</div>
