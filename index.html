@@ -39,8 +39,16 @@
 
     <div class="sidebar-section-label">Filters</div>
 
+    <div class="filter-group" style="padding-bottom:6px">
+      <label class="filter-label">View Mode</label>
+      <div style="display:flex;gap:4px">
+        <button id="vm-monthly"   class="view-mode-btn active" onclick="setViewMode('monthly')">Monthly</button>
+        <button id="vm-quarterly" class="view-mode-btn"        onclick="setViewMode('quarterly')">Quarterly</button>
+        <button id="vm-yearly"    class="view-mode-btn"        onclick="setViewMode('yearly')">Yearly</button>
+      </div>
+    </div>
     <div class="filter-group">
-      <label class="filter-label">Month</label>
+      <label class="filter-label" id="period-select-label">Month</label>
       <select id="month-select" class="filter-select"><option>Loading...</option></select>
     </div>
 

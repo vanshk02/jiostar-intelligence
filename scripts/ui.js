@@ -15,11 +15,228 @@ let CURRENT_CATEGORY = 'all';
 let CURRENT_AGENCY   = 'all';
 let SEARCH_CLIENT = '';
 const MAIN_BUS = ['LCS1','LCS2','MM1','MM2'];
+let VIEW_MODE     = 'monthly';
+let AGG_PRIOR_KEY = null;
+let AGG_LY_KEY    = null;
 function filterClientsByBU(clients, buName) {
   if (buName === 'all')    return clients;
   if (buName === 'Others') return clients.filter(c => !MAIN_BUS.includes(c.bu));
   return clients.filter(c => c.bu === buName);
 }
+
+// ══════════════════════════════════════════════════════════════
+//  QUARTERLY / YEARLY AGGREGATION
+// ══════════════════════════════════════════════════════════════
+
+function getFYInfo(yyyymm) {
+  const y = parseInt(yyyymm.slice(0,4));
+  const m = parseInt(yyyymm.slice(5,7));
+  let fyNum, qNum;
+  if (m >= 4) { fyNum = y + 1; qNum = Math.floor((m - 4) / 3) + 1; }
+  else         { fyNum = y;     qNum = 4; }
+  return { fyNum, fy: 'FY' + String(fyNum).slice(2), q: 'Q' + qNum, qNum };
+}
+
+function getQuarterMonthKeys(yyyymm) {
+  const { fyNum, qNum } = getFYInfo(yyyymm);
+  const startByQ = [null, [fyNum-1,4], [fyNum-1,7], [fyNum-1,10], [fyNum,1]];
+  const [sy, sm]  = startByQ[qNum];
+  return [0,1,2].map(i => {
+    let mm = sm + i, yy = sy;
+    if (mm > 12) { mm -= 12; yy++; }
+    return yy + '-' + String(mm).padStart(2,'0');
+  });
+}
+
+function getFYMonthKeys(yyyymm) {
+  const { fyNum } = getFYInfo(yyyymm);
+  return Array.from({length:12}, (_,i) => {
+    let mm = 4 + i, yy = fyNum - 1;
+    if (mm > 12) { mm -= 12; yy++; }
+    return yy + '-' + String(mm).padStart(2,'0');
+  });
+}
+
+function getPriorPeriodKeys(keys) {
+  if (!keys.length) return [];
+  const n = keys.length;
+  const [fy, fm] = keys[0].split('-').map(Number);
+  return Array.from({length:n}, (_,i) => {
+    let mm = fm - n + i, yy = fy;
+    while (mm < 1) { mm += 12; yy--; }
+    return yy + '-' + String(mm).padStart(2,'0');
+  });
+}
+
+function getLYPeriodKeys(keys) {
+  return keys.map(k => (parseInt(k.slice(0,4))-1) + '-' + k.slice(5));
+}
+
+function getPeriodLabel(keys) {
+  if (!keys || !keys.length) return '';
+  if (keys.length === 1) return DATA.months[keys[0]]?.label || keys[0];
+  if (keys.length === 3) { const { fy, q } = getFYInfo(keys[0]); return q + ' ' + fy; }
+  if (keys.length === 12) return getFYInfo(keys[0]).fy;
+  return (DATA.months[keys[0]]?.label||keys[0]) + '–' + (DATA.months[keys[keys.length-1]]?.label||keys[keys.length-1]);
+}
+
+const AGG_SUM_FIELDS = [
+  'del_rev','booked_rev','ctv_rev','mobile_rev','mobilectv_rev','video_rev','display_rev',
+  'ctv_video_rev','ctv_display_rev','mobile_video_rev','mobile_display_rev',
+  'mobilectv_video_rev','mobilectv_display_rev',
+  'preroll_rev','midroll_rev','integ_rev','spots_rev',
+  'billboard_rev','breakout_rev','pause_rev','frames_rev','fence_rev','untagged_rev',
+  'ctv_preroll_rev','ctv_midroll_rev','mob_preroll_rev','mob_midroll_rev',
+  'mctv_preroll_rev','mctv_midroll_rev',
+  'ctv_booked','mobile_booked','mobilectv_booked','video_booked','display_booked',
+  'ctv_video_booked','ctv_display_booked','mobile_video_booked','mobile_display_booked',
+  'mobilectv_video_booked','mobilectv_display_booked',
+  'preroll_imp','midroll_imp','ctv_preroll_imp','ctv_midroll_imp',
+  'mob_preroll_imp','mob_midroll_imp','mctv_preroll_imp','mctv_midroll_imp',
+  'clients','ctv_clients','mobile_clients','mobilectv_clients','video_clients','display_clients',
+];
+
+function sumObjFields(objects) {
+  const result = {};
+  AGG_SUM_FIELDS.forEach(f => {
+    let total = 0, hasAny = false;
+    objects.forEach(obj => { if (obj && obj[f] != null) { total += obj[f]; hasAny = true; } });
+    result[f] = (f === 'booked_rev') ? (hasAny ? r2(total) : null) : (hasAny ? r2(total) : 0);
+  });
+  return result;
+}
+
+function aggregateMonths(monthKeys) {
+  const validKeys = (monthKeys || []).filter(k => k && DATA.months[k]);
+  if (!validKeys.length) return null;
+  const months = validKeys.map(k => DATA.months[k]);
+
+  const totalDelRev = r2(months.reduce((t,m) => t + (m.total_del_rev||0), 0));
+  const allClientNames = new Set();
+  months.forEach(m => (m.top_clients||[]).forEach(c => { if (c.del_rev>0) allClientNames.add(c.name); }));
+
+  const buAgg = {};
+  ['LCS1','LCS2','MM1','MM2','Others'].forEach(bu => {
+    buAgg[bu] = sumObjFields(months.map(m => m.bu?.[bu] || {}));
+  });
+
+  const platAgg = {};
+  ['CTV','Mobile','Mobile+CTV'].forEach(p => {
+    platAgg[p] = sumObjFields(months.map(m => m.platform?.[p] || {}));
+  });
+
+  const catMap = {};
+  months.forEach(m => {
+    (m.categories||[]).forEach(cat => {
+      if (!catMap[cat.name]) catMap[cat.name] = {name:cat.name, del_rev:0, video_rev:0, display_rev:0, booked_rev:null, clients:0};
+      const e = catMap[cat.name];
+      e.del_rev += cat.del_rev||0; e.video_rev += cat.video_rev||0; e.display_rev += cat.display_rev||0;
+      if (cat.booked_rev != null) { e.booked_rev = (e.booked_rev||0) + cat.booked_rev; }
+      e.clients = Math.max(e.clients, cat.clients||0);
+    });
+  });
+
+  const agMap = {};
+  months.forEach(m => {
+    (m.agencies||[]).forEach(ag => {
+      if (!agMap[ag.name]) agMap[ag.name] = {name:ag.name, del_rev:0, video_rev:0, display_rev:0, booked_rev:null, clients:0};
+      const e = agMap[ag.name];
+      e.del_rev += ag.del_rev||0; e.video_rev += ag.video_rev||0; e.display_rev += ag.display_rev||0;
+      if (ag.booked_rev != null) { e.booked_rev = (e.booked_rev||0) + ag.booked_rev; }
+      e.clients = Math.max(e.clients, ag.clients||0);
+    });
+  });
+
+  const adTypeAgg = {};
+  ['Video','Display'].forEach(at => {
+    const summed = sumObjFields(months.map(m => m.ad_type?.[at] || {}));
+    const formats = {};
+    months.forEach(m => { Object.entries(m.ad_type?.[at]?.formats||{}).forEach(([fmt,rev]) => { formats[fmt] = (formats[fmt]||0) + rev; }); });
+    adTypeAgg[at] = { ...summed, formats };
+  });
+
+  const clientMap = {};
+  months.forEach(m => {
+    (m.top_clients||[]).forEach(c => {
+      if (!clientMap[c.name]) {
+        clientMap[c.name] = { name:c.name, bu:c.bu, category:c.category, agency:c.agency };
+        AGG_SUM_FIELDS.forEach(f => { clientMap[c.name][f] = (f==='booked_rev') ? null : 0; });
+      }
+      const cd = clientMap[c.name];
+      AGG_SUM_FIELDS.forEach(f => {
+        if (c[f] != null) {
+          if (f === 'booked_rev') { cd.booked_rev = (cd.booked_rev||0) + c[f]; }
+          else { cd[f] = (cd[f]||0) + c[f]; }
+        }
+      });
+      if (c.category_rev_map) cd.category_rev_map = c.category_rev_map;
+      if (c.agency_rev_map)   cd.agency_rev_map   = c.agency_rev_map;
+      if (c.brands)           cd.brands           = c.brands;
+    });
+  });
+
+  const ecpmRows = [];
+  months.forEach(m => { (m.ecpm_data?.rows||[]).forEach(r => ecpmRows.push({...r})); });
+
+  const priorKeys = getPriorPeriodKeys(validKeys);
+  const lyKeys    = getLYPeriodKeys(validKeys);
+  const sumRevForKeys = ks => r2(ks.reduce((t,k) => t + (DATA.months[k]?.total_del_rev||0), 0));
+  const priorTotalRev = sumRevForKeys(priorKeys);
+  const lyTotalRev    = sumRevForKeys(lyKeys);
+
+  ['LCS1','LCS2','MM1','MM2','Others'].forEach(bu => {
+    const pR = r2(priorKeys.reduce((t,k) => t+(DATA.months[k]?.bu?.[bu]?.del_rev||0), 0));
+    const lR = r2(lyKeys.reduce((t,k)    => t+(DATA.months[k]?.bu?.[bu]?.del_rev||0), 0));
+    buAgg[bu].growth_vs_lm = pR>0 ? r2(((buAgg[bu].del_rev-pR)/pR)*100) : null;
+    buAgg[bu].growth_vs_ly = lR>0 ? r2(((buAgg[bu].del_rev-lR)/lR)*100) : null;
+  });
+  ['CTV','Mobile','Mobile+CTV'].forEach(p => {
+    const pR = r2(priorKeys.reduce((t,k) => t+(DATA.months[k]?.platform?.[p]?.del_rev||0), 0));
+    const lR = r2(lyKeys.reduce((t,k)    => t+(DATA.months[k]?.platform?.[p]?.del_rev||0), 0));
+    platAgg[p].growth_vs_lm = pR>0 ? r2(((platAgg[p].del_rev-pR)/pR)*100) : null;
+    platAgg[p].growth_vs_ly = lR>0 ? r2(((platAgg[p].del_rev-lR)/lR)*100) : null;
+  });
+
+  return {
+    label:          getPeriodLabel(validKeys),
+    total_del_rev:  totalDelRev,
+    total_clients:  allClientNames.size,
+    vs_prior_month: priorTotalRev>0 ? { change_pct: r2(((totalDelRev-priorTotalRev)/priorTotalRev)*100), label: getPeriodLabel(priorKeys) } : null,
+    vs_last_year:   lyTotalRev>0    ? { change_pct: r2(((totalDelRev-lyTotalRev)/lyTotalRev)*100),       label: getPeriodLabel(lyKeys) }    : null,
+    bu: buAgg, platform: platAgg,
+    categories: Object.values(catMap).sort((a,b) => b.del_rev-a.del_rev),
+    agencies:   Object.values(agMap).sort((a,b)  => b.del_rev-a.del_rev),
+    top_clients: Object.values(clientMap).filter(c=>c.del_rev>0).sort((a,b)=>b.del_rev-a.del_rev),
+    ad_type: adTypeAgg, ecpm_data: { rows: ecpmRows },
+    _periodKeys: validKeys, _priorKeys: priorKeys, _lyKeys: lyKeys,
+  };
+}
+
+function setViewMode(mode) {
+  VIEW_MODE = mode;
+  document.querySelectorAll('.view-mode-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('vm-' + mode);
+  if (btn) btn.classList.add('active');
+  const currentRef = CURRENT_MONTH;
+  populateMonthDropdown();
+  const sel = document.getElementById('month-select');
+  if (mode === 'quarterly') {
+    const qFirst = getQuarterMonthKeys(currentRef)[0];
+    const opt = Array.from(sel.options).find(o => o.value === qFirst);
+    sel.value = opt ? opt.value : sel.options[0]?.value;
+  } else if (mode === 'yearly') {
+    const { fyNum } = getFYInfo(currentRef);
+    const aprilKey  = (fyNum-1) + '-04';
+    const opt = Array.from(sel.options).find(o => o.value === aprilKey);
+    sel.value = opt ? opt.value : sel.options[0]?.value;
+  } else {
+    const opt = Array.from(sel.options).find(o => o.value === currentRef);
+    sel.value = opt ? opt.value : sel.options[0]?.value;
+  }
+  CURRENT_MONTH = sel.value;
+  renderAll();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadData();
   document.getElementById('query-input').addEventListener('keydown', e => {
@@ -57,9 +274,35 @@ async function loadData() {
 function populateMonthDropdown() {
   const sel = document.getElementById('month-select');
   sel.innerHTML = '';
+  const lbl = document.getElementById('period-select-label');
+  if (lbl) lbl.textContent = VIEW_MODE === 'monthly' ? 'Month' : VIEW_MODE === 'quarterly' ? 'Quarter' : 'Year';
+
+  if (VIEW_MODE === 'monthly') {
+    DATA.available_months.slice().reverse().forEach(m => {
+      const o = document.createElement('option');
+      o.value = m; o.textContent = DATA.months[m] ? DATA.months[m].label : m;
+      sel.appendChild(o);
+    });
+    return;
+  }
+  if (VIEW_MODE === 'quarterly') {
+    const seen = new Set();
+    DATA.available_months.slice().reverse().forEach(m => {
+      const { fy, q, fyNum, qNum } = getFYInfo(m);
+      const qKey = fy + '-' + q; if (seen.has(qKey)) return; seen.add(qKey);
+      const startByQ = [null,[fyNum-1,4],[fyNum-1,7],[fyNum-1,10],[fyNum,1]];
+      const [sy, sm] = startByQ[qNum];
+      const o = document.createElement('option');
+      o.value = sy + '-' + String(sm).padStart(2,'0'); o.textContent = q + ' ' + fy;
+      sel.appendChild(o);
+    });
+    return;
+  }
+  const seen = new Set();
   DATA.available_months.slice().reverse().forEach(m => {
+    const { fy, fyNum } = getFYInfo(m); if (seen.has(fy)) return; seen.add(fy);
     const o = document.createElement('option');
-    o.value = m; o.textContent = DATA.months[m] ? DATA.months[m].label : m;
+    o.value = (fyNum-1) + '-04'; o.textContent = fy;
     sel.appendChild(o);
   });
 }
@@ -706,10 +949,36 @@ function renderBubbleMap(md) {
 }
 // ── Render all ────────────────────────────────────
 function renderAll() {
-  const md = DATA.months[CURRENT_MONTH]; if (!md) return;
+  if (VIEW_MODE === 'monthly') {
+    const md = DATA.months[CURRENT_MONTH]; if (!md) return;
+    AGG_PRIOR_KEY = null; AGG_LY_KEY = null;
+    _renderAllWith(md); return;
+  }
+  const currentKeys = VIEW_MODE === 'quarterly' ? getQuarterMonthKeys(CURRENT_MONTH) : getFYMonthKeys(CURRENT_MONTH);
+  const md = aggregateMonths(currentKeys); if (!md) return;
+  const aggPrior = aggregateMonths(getPriorPeriodKeys(currentKeys));
+  const aggLY    = aggregateMonths(getLYPeriodKeys(currentKeys));
+  DATA.months['__AGG_CURR__']  = md;
+  DATA.months['__AGG_PRIOR__'] = aggPrior || {};
+  DATA.months['__AGG_LY__']    = aggLY    || {};
+  AGG_PRIOR_KEY = aggPrior ? '__AGG_PRIOR__' : null;
+  AGG_LY_KEY    = aggLY    ? '__AGG_LY__'    : null;
+  const saved = CURRENT_MONTH; CURRENT_MONTH = '__AGG_CURR__';
+  _renderAllWith(md);
+  CURRENT_MONTH = saved; AGG_PRIOR_KEY = null; AGG_LY_KEY = null;
+}
+function _renderAllWith(md) {
   renderHeader(md); renderKPIs(md); renderCharts(md); renderBubbleMap(md);
   renderBU(md); renderPlatform(md); renderAdType(md);
-  renderCategories(md); renderAgencies(md); renderClients(md); renderCohort(); renderChurners(); renderFlags(md); renderPillBar(); renderSectionBadges();
+  renderCategories(md); renderAgencies(md); renderClients(md);
+  if (VIEW_MODE === 'monthly') { renderCohort(); renderChurners(); }
+  else {
+    ['cohort-panel','churner-panel'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<div style="padding:20px 18px;color:var(--ink-soft);font-size:13px">📅 Switch to <strong>Monthly</strong> view to see this data.</div>';
+    });
+  }
+  renderFlags(md); renderPillBar(); renderSectionBadges();
 }
 
 // ── Header ────────────────────────────────────────
@@ -3626,6 +3895,11 @@ function renderSectionBadges() {
   }
 
   // ── Watch List ────────────────────────────────────
+  if (VIEW_MODE !== 'monthly') {
+    const wb = document.getElementById('badges-watchlist');
+    if (wb) wb.innerHTML = badge('Switch to Monthly for churn data', '#64748B');
+    return;
+  }
   const currentNames = new Set((md.top_clients || []).map(c => c.name));
   let redChurners = 0, amberChurners = 0;
   const seenChurners = new Set();
@@ -3724,13 +3998,18 @@ function fmtNum(n){const v=Number(n)||0; return v.toFixed(1);}
 function fmtInt(n){return Math.round(Number(n)||0).toLocaleString('en-IN');}
 function r2(n) { return Math.round((Number(n)||0)*100)/100; }
 function priorMonthKey(yyyymm) {
-  let y = parseInt(yyyymm.slice(0,4));
-  let m = parseInt(yyyymm.slice(5,7)) - 1;
+  if (AGG_PRIOR_KEY && yyyymm === '__AGG_CURR__') return AGG_PRIOR_KEY;
+  const y0 = parseInt(yyyymm.slice(0,4)), m0 = parseInt(yyyymm.slice(5,7));
+  if (isNaN(y0) || isNaN(m0)) return yyyymm;
+  let y = y0, m = m0 - 1;
   if (m < 1) { m = 12; y--; }
   return y + '-' + String(m).padStart(2,'0');
 }
 function lyMonthKey(yyyymm) {
-  return (parseInt(yyyymm.slice(0,4)) - 1) + '-' + yyyymm.slice(5,7);
+  if (AGG_LY_KEY && yyyymm === '__AGG_CURR__') return AGG_LY_KEY;
+  const y = parseInt(yyyymm.slice(0,4));
+  if (isNaN(y)) return yyyymm;
+  return (y - 1) + '-' + yyyymm.slice(5,7);
 }
 function nextMonthKey(yyyymm) {
   let y = parseInt(yyyymm.slice(0,4));
