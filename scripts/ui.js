@@ -13,6 +13,7 @@ let CURRENT_ADTYPE   = 'all';
 let CURRENT_FORMAT   = 'all';
 let CURRENT_CATEGORY = 'all';
 let CURRENT_AGENCY   = 'all';
+let SEARCH_CLIENT = '';
 const MAIN_BUS = ['LCS1','LCS2','MM1','MM2'];
 function filterClientsByBU(clients, buName) {
   if (buName === 'all')    return clients;
@@ -76,7 +77,7 @@ function populateAgencyDropdown() {
 }
 function attachListeners() {
   document.getElementById('month-select').addEventListener('change', e => {
-    CURRENT_MONTH=e.target.value; CURRENT_CATEGORY='all'; CURRENT_AGENCY='all';
+    CURRENT_MONTH=e.target.value; CURRENT_CATEGORY='all'; CURRENT_AGENCY='all'; SEARCH_CLIENT='';
     document.getElementById('category-select').value='all';
     document.getElementById('agency-select').value='all';
     populateCategoryDropdown(); populateAgencyDropdown(); renderAll();
@@ -421,10 +422,30 @@ function renderCharts(md) {
   const buCurr   = buLabels.map(b => md.bu[b] ? r2(md.bu[b].del_rev) : 0);
   const buLY     = buLabels.map(b => lyMd && lyMd.bu[b] ? r2(lyMd.bu[b].del_rev) : 0);
 
+  const barLabelPlugin = {
+    id: 'barLabels',
+    afterDatasetsDraw(chart) {
+      const { ctx, data } = chart;
+      ctx.save();
+      data.datasets.forEach((dataset, di) => {
+        chart.getDatasetMeta(di).data.forEach((bar, i) => {
+          const val = dataset.data[i];
+          if (!val) return;
+          ctx.fillStyle = '#475569';
+          ctx.font = '500 10px DM Sans, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(val + ' Cr', bar.x, bar.y - 4);
+        });
+      });
+      ctx.restore();
+    }
+  };
+
   if (buChart) buChart.destroy();
   const buCtx = document.getElementById('bu-chart').getContext('2d');
   buChart = new Chart(buCtx, {
     type: 'bar',
+    plugins: [barLabelPlugin],
     data: {
       labels: buLabels,
       datasets: [
@@ -460,10 +481,37 @@ function renderCharts(md) {
   const platData   = platLabels.map(p => md.platform[p] ? r2(md.platform[p].del_rev) : 0);
   const platColors = ['rgba(59,130,246,0.85)','rgba(16,185,129,0.85)','rgba(245,158,11,0.85)'];
 
+  const doughnutLabelPlugin = {
+    id: 'doughnutLabels',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      const dataset = chart.data.datasets[0];
+      const total = dataset.data.reduce((a, b) => a + b, 0);
+      ctx.save();
+      chart.getDatasetMeta(0).data.forEach((arc, i) => {
+        const val = dataset.data[i];
+        if (!val) return;
+        const pct = Math.round((val / total) * 100);
+        if (pct < 5) return;
+        const angle = (arc.startAngle + arc.endAngle) / 2;
+        const r = (arc.innerRadius + arc.outerRadius) / 2;
+        const x = arc.x + r * Math.cos(angle);
+        const y = arc.y + r * Math.sin(angle);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px DM Sans, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pct + '%', x, y);
+      });
+      ctx.restore();
+    }
+  };
+
   if (platformChart) platformChart.destroy();
   const platCtx = document.getElementById('platform-chart').getContext('2d');
   platformChart = new Chart(platCtx, {
     type: 'doughnut',
+    plugins: [doughnutLabelPlugin],
     data: {
       labels: platLabels,
       datasets: [{
@@ -517,7 +565,7 @@ function renderBubbleMap(md) {
     if (d.x >= 0 && d.y >= medianRev) return 'rgba(16,185,129,0.80)';
     if (d.x <  0 && d.y >= medianRev) return 'rgba(245,158,11,0.80)';
     if (d.x >= 0 && d.y <  medianRev) return 'rgba(59,130,246,0.80)';
-    return 'rgba(100,116,139,0.55)';
+    return 'rgba(139,92,246,0.55)';
   };
 
   // Highlight active category
@@ -540,7 +588,7 @@ function renderBubbleMap(md) {
         { x: cx,   y: top,  w: right - cx,  h: cy - top,    color: 'rgba(16,185,129,0.04)'  },
         { x: left, y: top,  w: cx - left,   h: cy - top,    color: 'rgba(245,158,11,0.04)'  },
         { x: cx,   y: cy,   w: right - cx,  h: bottom - cy, color: 'rgba(59,130,246,0.04)'  },
-        { x: left, y: cy,   w: cx - left,   h: bottom - cy, color: 'rgba(100,116,139,0.04)' },
+        { x: left, y: cy,   w: cx - left,   h: bottom - cy, color: 'rgba(139,92,246,0.04)' },
       ];
       fills.forEach(f => { ctx.fillStyle = f.color; ctx.fillRect(f.x, f.y, f.w, f.h); });
 
@@ -554,10 +602,10 @@ function renderBubbleMap(md) {
 
       // Quadrant labels
       const labels = [
-        { text: 'DOUBLE DOWN',  color: 'rgba(16,185,129,0.7)',  x: cx + 8,   y: top + 14    },
-        { text: 'DEFEND',       color: 'rgba(245,158,11,0.7)',  x: left + 8, y: top + 14    },
-        { text: 'INVEST',       color: 'rgba(59,130,246,0.7)',  x: cx + 8,   y: bottom - 10 },
-        { text: 'DEPRIORITIZE', color: 'rgba(100,116,139,0.6)', x: left + 8, y: bottom - 10 },
+        { text: 'SCALE UP',          color: 'rgba(16,185,129,0.7)',  x: cx + 8,   y: top + 14    },
+        { text: 'REVIVE & PROTECT',  color: 'rgba(245,158,11,0.7)',  x: left + 8, y: top + 14    },
+        { text: 'BUILD MOMENTUM',    color: 'rgba(59,130,246,0.7)',  x: cx + 8,   y: bottom - 10 },
+        { text: 'UNTAPPED',          color: 'rgba(139,92,246,0.7)',  x: left + 8, y: bottom - 10 },
       ];
       ctx.font = '600 10px DM Sans, sans-serif';
       labels.forEach(l => { ctx.fillStyle = l.color; ctx.fillText(l.text, l.x, l.y); });
@@ -672,11 +720,11 @@ function renderHeader(md) {
   let metaHtml = `<span>${fmtInt(md.total_clients)} active clients</span>`;
   if (md.vs_prior_month && md.vs_prior_month.change_pct !== null) {
     const p = md.vs_prior_month.change_pct;
-    metaHtml += ` <span style="color:var(--ink-faint)">·</span> <span style="color:${colOf(p)}">Del Rev ${p>=0?'+':''}${p}% vs ${md.vs_prior_month.label}</span>`;
+    metaHtml += ` <span style="color:var(--ink-faint)">·</span> <span style="color:${colOf(p)};white-space:nowrap">Del Rev ${p>=0?'+':''}${p}% vs ${md.vs_prior_month.label}</span>`;
   }
   if (md.vs_last_year && md.vs_last_year.change_pct !== null) {
     const p = md.vs_last_year.change_pct;
-    metaHtml += ` <span style="color:var(--ink-faint)">·</span> <span style="color:${colOf(p)}">Del Rev ${p>=0?'+':''}${p}% vs ${md.vs_last_year.label}</span>`;
+    metaHtml += ` <span style="color:var(--ink-faint)">·</span> <span style="color:${colOf(p)};white-space:nowrap">Del Rev ${p>=0?'+':''}${p}% vs ${md.vs_last_year.label}</span>`;
   }
   document.getElementById('topbar-meta').innerHTML = metaHtml;
 }
@@ -985,10 +1033,7 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       ? `<div class="kpi-card">
           <div class="kpi-label">eCPM</div>
           <div class="kpi-value">₹${fmtNum(ecpmVal)}<span class="kpi-unit"> </span></div>
-          <div style="font-size:11px;color:var(--ink-soft);margin-bottom:4px">
-  ${CURRENT_FORMAT === 'Preroll' ? 'Preroll only' : CURRENT_FORMAT === 'Midroll' ? 'Midroll only' : 'Preroll + Midroll'} · excl. Mediation
-  ${(CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all') ? '<span style="color:var(--amber);margin-left:4px" title="eCPM data is not broken down by Category or Agency">⚠ Cat/Agency filter not applied</span>' : ''}
-</div>
+          <div style="font-size:11px;color:var(--ink-soft);margin-bottom:4px">${CURRENT_FORMAT === 'Preroll' ? 'Preroll only' : CURRENT_FORMAT === 'Midroll' ? 'Midroll only' : 'Preroll + Midroll'} · excl. Mediation</div>
           ${ecpmMomPct !== null ? `<div class="kpi-change ${ecpmMomPct>=0?'up':'down'}">${ecpmMomPct>=0?'↑':'↓'} ${Math.abs(ecpmMomPct)}% <span style="color:var(--ink-soft);font-size:11px">vs ${DATA.months[priorMonthKey(CURRENT_MONTH)]?.label||'LM'}</span></div>` : ''}
           ${ecpmLyPct  !== null ? `<div class="kpi-change ${ecpmLyPct>=0?'up':'down'}">${ecpmLyPct>=0?'↑':'↓'} ${Math.abs(ecpmLyPct)}% <span style="color:var(--ink-soft);font-size:11px">vs ${DATA.months[lyMonthKey(CURRENT_MONTH)]?.label||'LY'}</span></div>` : ''}
         </div>`
@@ -1451,7 +1496,7 @@ function renderPlatform(md) {
       else                                                 booked = buData.booked_rev;
       booked = booked != null ? r2(booked) : null;
     } else {
-      booked = r2(bookedSum);
+      booked = bookedSum > 0 ? r2(bookedSum) : null;
     }
 
     return { rev: r2(rev), booked, clients: platClientCount };
@@ -1729,7 +1774,7 @@ clients: clientCount,
 
     const clientCount = filteredClients.filter(c => clientRev(c, isVideo) > 0).length;
 
-    return { rev: r2(rev), booked: r2(bookedRaw), clients: clientCount };
+    return { rev: r2(rev), booked: bookedRaw > 0 ? r2(bookedRaw) : null, clients: clientCount };
   };
 
   const getFormatData = (fmt, adType, monthData) => {
@@ -1751,7 +1796,7 @@ clients: clientCount,
         else                         bookedRaw += b[`${base}_booked`]      ?? 0;
       });
       clientCount = (monthData.top_clients || []).filter(c => clientFormatRev(c, base) > 0).length;
-      return { rev: r2(rev), booked: r2(bookedRaw), clients: clientCount };
+      return { rev: r2(rev), booked: bookedRaw > 0 ? r2(bookedRaw) : null, clients: clientCount };
     }
 
     if (!needsClientFilter) {
@@ -1785,7 +1830,7 @@ clients: clientCount,
     }
 
     clientCount = filteredClients.filter(c => clientFormatRev(c, base) > 0).length;
-    return { rev: r2(rev), booked: r2(bookedRaw), clients: clientCount };
+    return { rev: r2(rev), booked: bookedRaw > 0 ? r2(bookedRaw) : null, clients: clientCount };
   };
 
   // ── Build table ────────────────────────────────────────────────────────
@@ -1845,7 +1890,7 @@ clients: clientCount,
         rows += `<tr style="${!isFmtActive ? 'opacity:0.3' : ''}">
           <td style="padding-left:24px;color:var(--ink-soft);font-size:12px">${fmt}</td>
           <td style="text-align:right;font-family:var(--mono);font-size:12px">${fmtNum(fd.rev)} Cr</td>
-          <td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-soft)">${fmtNum(fd.booked)} Cr</td>
+          <td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-soft)">${fd.booked != null ? fmtNum(fd.booked) + ' Cr' : '—'}</td>
           <td style="text-align:right;color:var(--ink-soft)">—</td>
           <td style="text-align:right;color:var(--ink-soft)">—</td>
           <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${fd.clients}</td>
@@ -1983,7 +2028,7 @@ function renderCategories(md) {
       }
     });
 
-    return { rev: r2(rev), booked: r2(bookedRaw), clients: clientSet.size };
+    return { rev: r2(rev), booked: bookedRaw > 0 ? r2(bookedRaw) : null, clients: clientSet.size };
   };
 
   // ── Build rows ──────────────────────────────────────────────────────────
@@ -2183,7 +2228,7 @@ function renderAgencies(md) {
       clientSet.add(c.name);
     });
 
-    return { rev: r2(rev), booked: r2(bookedRaw), clients: clientSet.size };
+    return { rev: r2(rev), booked: bookedRaw > 0 ? r2(bookedRaw) : null, clients: clientSet.size };
   };
 
   // ── Build rows ──────────────────────────────────────────────────────────
@@ -2346,16 +2391,35 @@ function renderClients(md) {
   }));
   clients.sort((a, b) => b._filteredRev - a._filteredRev);
   clients = clients.filter(c => c._filteredRev > 0);
-  clients = clients.slice(0, 20);
+  const searchTerm = SEARCH_CLIENT.trim().toLowerCase();
+  if (searchTerm) {
+    clients = clients.filter(c => c.name.toLowerCase().includes(searchTerm));
+  } else {
+    clients = clients.slice(0, 20);
+  }
 
   // ── Panel title ──────────────────────────────────────────────────────
   const parts = [CURRENT_BU, p, a, f, CURRENT_CATEGORY, CURRENT_AGENCY].filter(v => v !== 'all');
-  document.getElementById('clients-panel-title').textContent =
-    'Top Clients' + (parts.length ? '  —  ' + parts.join(' · ') : '');
+  document.getElementById('clients-panel-title').textContent = searchTerm
+    ? `Search: "${SEARCH_CLIENT}" — ${clients.length} result${clients.length !== 1 ? 's' : ''}`
+    : 'Top Clients' + (parts.length ? '  —  ' + parts.join(' · ') : '');
 
   if (!clients.length) {
-    document.getElementById('clients-panel').innerHTML =
-      '<div style="padding:24px 18px;color:var(--ink-soft);font-size:13px">No clients match the selected filters.</div>';
+    document.getElementById('clients-panel').innerHTML = `
+      <div style="padding:10px 18px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+        <span style="font-size:13px;color:var(--ink-soft)">🔍</span>
+        <input type="text" id="client-search-input"
+          placeholder="Search any client by name..."
+          value="${SEARCH_CLIENT.replace(/"/g,'&quot;')}"
+          oninput="SEARCH_CLIENT=this.value;renderClients(DATA.months[CURRENT_MONTH])"
+          style="flex:1;padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;background:var(--surface);color:var(--ink);outline:none"/>
+        ${SEARCH_CLIENT ? `<button onclick="SEARCH_CLIENT='';renderClients(DATA.months[CURRENT_MONTH])" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--ink-soft);padding:2px 6px">✕</button>` : ''}
+      </div>
+      <div style="padding:24px 18px;color:var(--ink-soft);font-size:13px">
+        ${searchTerm ? `No results for "<strong>${SEARCH_CLIENT}</strong>" — try a different name.` : 'No clients match the selected filters.'}
+      </div>`;
+    const _si = document.getElementById('client-search-input');
+    if (_si && SEARCH_CLIENT) { _si.focus(); _si.setSelectionRange(_si.value.length, _si.value.length); }
     return;
   }
 
@@ -2430,6 +2494,15 @@ function renderClients(md) {
   </tr>`;
 
   document.getElementById('clients-panel').innerHTML = `
+    <div style="padding:10px 18px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+      <span style="font-size:13px;color:var(--ink-soft)">🔍</span>
+      <input type="text" id="client-search-input"
+        placeholder="Search any client by name..."
+        value="${SEARCH_CLIENT.replace(/"/g,'&quot;')}"
+        oninput="SEARCH_CLIENT=this.value;renderClients(DATA.months[CURRENT_MONTH])"
+        style="flex:1;padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;background:var(--surface);color:var(--ink);outline:none"/>
+      ${SEARCH_CLIENT ? `<button onclick="SEARCH_CLIENT='';renderClients(DATA.months[CURRENT_MONTH])" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--ink-soft);padding:2px 6px">✕</button>` : ''}
+    </div>
     <div style="overflow-x:auto">
       <table class="ptable">
         <thead><tr>
@@ -2452,6 +2525,9 @@ function renderClients(md) {
         <tbody>${rowsHtml}${totalRow}</tbody>
       </table>
     </div>`;
+
+  const _si = document.getElementById('client-search-input');
+  if (_si && SEARCH_CLIENT) { _si.focus(); _si.setSelectionRange(_si.value.length, _si.value.length); }
 }
 // ── Client Health Score ───────────────────────────
 function clientHealthScore(clientName, currentRev) {
@@ -3224,30 +3300,32 @@ function exportPanel(panelId, filename) {
   table.querySelectorAll('tr').forEach(tr => {
     const cells = [];
     tr.querySelectorAll('th, td').forEach(td => {
-      // Strip "Cr", badges, buttons — get clean text
       let text = td.innerText || td.textContent || '';
-      text = text.replace(/\s*Cr\s*/g, '')  // remove Cr
-                 .replace(/[↑↓→]/g, '')      // remove arrows
-                 .replace(/\+/g, '')          // remove + signs
-                 .replace(/\n/g, ' ')         // flatten newlines
-                 .trim();
+      text = text.replace(/\s*Cr\s*/g, '').replace(/[↑↓→]/g, '')
+                 .replace(/\+/g, '').replace(/\n/g, ' ').trim();
       cells.push(text);
     });
-    if (cells.some(c => c !== '')) rows.push(cells.join('\t'));
+    if (cells.some(c => c !== '')) rows.push(cells);
   });
 
-  const tsv = rows.join('\n');
-  navigator.clipboard.writeText(tsv).then(() => {
-    // Flash feedback on button
-    const btn = document.querySelector(`[data-export="${panelId}"]`);
-    if (btn) {
-      const orig = btn.textContent;
-      btn.textContent = '✓ Copied!';
-      btn.style.background = 'var(--green)';
-      btn.style.color = 'white';
-      setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.style.color = ''; }, 2000);
-    }
-  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  const monthLabel = CURRENT_MONTH && DATA.months[CURRENT_MONTH]
+    ? DATA.months[CURRENT_MONTH].label : '';
+  const sheetName = (filename || panelId).slice(0, 31);
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const fname = (filename || panelId) + (monthLabel ? '_' + monthLabel : '') + '.xlsx';
+  XLSX.writeFile(wb, fname);
+
+  const btn = document.querySelector(`[data-export="${panelId}"]`);
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓ Downloaded!';
+    btn.style.background = 'var(--green)';
+    btn.style.color = 'white';
+    setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.style.color = ''; }, 2000);
+  }
 }
 
 function copyGeminiAnswer() {
