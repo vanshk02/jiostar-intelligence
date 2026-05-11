@@ -307,16 +307,26 @@ function populateMonthDropdown() {
   });
 }
 function populateCategoryDropdown() {
-  const md = DATA.months[CURRENT_MONTH]; if (!md) return;
   const sel = document.getElementById('category-select');
   while (sel.options.length > 1) sel.remove(1);
-  (md.categories||[]).forEach(c => { const o=document.createElement('option'); o.value=c.name; o.textContent=c.name; sel.appendChild(o); });
+  const seen = new Set();
+  DATA.available_months.forEach(mkey => {
+    (DATA.months[mkey]?.categories || []).forEach(c => { if (c.name) seen.add(c.name); });
+  });
+  [...seen].sort().forEach(name => {
+    const o = document.createElement('option'); o.value = name; o.textContent = name; sel.appendChild(o);
+  });
 }
 function populateAgencyDropdown() {
-  const md = DATA.months[CURRENT_MONTH]; if (!md) return;
   const sel = document.getElementById('agency-select');
   while (sel.options.length > 1) sel.remove(1);
-  (md.agencies||[]).forEach(a => { const o=document.createElement('option'); o.value=a.name; o.textContent=a.name; sel.appendChild(o); });
+  const seen = new Set();
+  DATA.available_months.forEach(mkey => {
+    (DATA.months[mkey]?.agencies || []).forEach(a => { if (a.name) seen.add(a.name); });
+  });
+  [...seen].sort().forEach(name => {
+    const o = document.createElement('option'); o.value = name; o.textContent = name; sel.appendChild(o);
+  });
 }
 function attachListeners() {
   document.getElementById('month-select').addEventListener('change', e => {
@@ -1549,8 +1559,10 @@ clients: clients.length,
     {label:'Booked',  right:true, w:'80px'},
     {label:'Target',  right:true, w:'70px'},
     {label:'Ach%',    right:true, w:'60px'},
-    {label:'vs LM',   right:true, w:'80px'},
-    {label:'vs LY',   right:true, w:'80px'},
+    {label:'LM Rev',  right:true, w:'80px'},
+    {label:'vs LM',   right:true, w:'72px'},
+    {label:'LY Rev',  right:true, w:'80px'},
+    {label:'vs LY',   right:true, w:'72px'},
     {label:'Clients', right:true, w:'60px'},
   ];
 
@@ -1559,7 +1571,7 @@ clients: clients.length,
     const isActive = CURRENT_BU === 'all' || CURRENT_BU === bu;
     const cls      = CURRENT_BU === bu ? 'badge-green' : 'badge-blue';
 
-    let rev, bookedCr, clients, momPct, loyPct;
+    let rev, bookedCr, clients, momPct, loyPct, lmRev, lyRev;
 
     if (anyFilterActive) {
       const curr  = getFilteredData(bu, md);
@@ -1568,14 +1580,20 @@ clients: clients.length,
       rev      = curr.rev;
       bookedCr = curr.booked;
       clients  = bu === 'Others' ? '—' : curr.clients;
-      momPct   = prior.rev > 0 ? r2(((curr.rev - prior.rev) / prior.rev) * 100) : null;
-      loyPct   = ly.rev    > 0 ? r2(((curr.rev - ly.rev)    / ly.rev)    * 100) : null;
+      lmRev    = prior.rev > 0 ? prior.rev : null;
+      lyRev    = ly.rev    > 0 ? ly.rev    : null;
+      momPct   = lmRev !== null ? r2(((curr.rev - lmRev) / lmRev) * 100) : null;
+      loyPct   = lyRev !== null ? r2(((curr.rev - lyRev) / lyRev) * 100) : null;
     } else {
       rev      = activeRevField(b);
       bookedCr = b.booked_rev != null ? r2(b.booked_rev) : null;
       clients  = bu === 'Others' ? '—' : (b.clients || 0);
       momPct   = b.growth_vs_lm ?? null;
       loyPct   = b.growth_vs_ly ?? null;
+      const priorB = priorMd ? (priorMd.bu[bu] || {}) : {};
+      const lyB    = lyMd    ? (lyMd.bu[bu]    || {}) : {};
+      lmRev = r2(activeRevField(priorB) || 0) > 0 ? r2(activeRevField(priorB)) : null;
+      lyRev = r2(activeRevField(lyB)    || 0) > 0 ? r2(activeRevField(lyB))    : null;
     }
 
     return `<tr style="${!isActive?'opacity:0.3':''}">
@@ -1584,14 +1602,16 @@ clients: clients.length,
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${bookedCr != null ? fmtNum(bookedCr) + ' Cr' : '—'}</td>
       <td style="text-align:right;color:var(--ink-soft)">—</td>
       <td style="text-align:right;color:var(--ink-soft)">—</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${lmRev !== null ? fmtNum(lmRev) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${lyRev !== null ? fmtNum(lyRev) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${clients}</td>
     </tr>`;
   }).join('');
 
   // Calculate totals from what's displayed
-  let totalRev = 0, totalBooked = 0, totalClients = 0;
+  let totalRev = 0, totalBooked = 0, totalClients = 0, totalLmRev = 0, totalLyRev = 0;
   let totalMomNum = 0, totalMomDen = 0, totalLyNum = 0, totalLyDen = 0;
 
   buList.forEach(bu => {
@@ -1607,14 +1627,18 @@ clients: clients.length,
       rev      = curr.rev;
       bookedCr = curr.booked;
       clients  = bu === 'Others' ? 0 : curr.clients;
-      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; }
-      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    }
+      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; totalLmRev += prior.rev; }
+      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    totalLyRev += ly.rev;    }
     } else {
       rev      = activeRevField(b);
       bookedCr = b.booked_rev != null ? r2(b.booked_rev) : null;
       clients  = bu === 'Others' ? 0 : (b.clients || 0);
-      if (b.growth_vs_lm != null) { totalMomNum += rev * (b.growth_vs_lm/100); totalMomDen += rev / (1 + b.growth_vs_lm/100); }
-      if (b.growth_vs_ly != null) { totalLyNum  += rev * (b.growth_vs_ly/100); totalLyDen  += rev / (1 + b.growth_vs_ly/100); }
+      const priorB = priorMd ? (priorMd.bu[bu] || {}) : {};
+      const lyB    = lyMd    ? (lyMd.bu[bu]    || {}) : {};
+      const pRev   = r2(activeRevField(priorB) || 0);
+      const lRev   = r2(activeRevField(lyB)    || 0);
+      if (pRev > 0) { totalMomNum += rev - pRev; totalMomDen += pRev; totalLmRev += pRev; }
+      if (lRev > 0) { totalLyNum  += rev - lRev; totalLyDen  += lRev; totalLyRev += lRev; }
     }
     totalRev     += rev;
     totalBooked  += bookedCr;
@@ -1630,7 +1654,9 @@ clients: clients.length,
     '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
+    '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalLmRev > 0 ? fmtNum(r2(totalLmRev)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right">' + growthBadge(totalMomPct) + '</td>' +
+    '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right">' + growthBadge(totalLyPct) + '</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">' + fmtInt(totalClients) + '</td>' +
     '</tr>';
@@ -1777,8 +1803,10 @@ function renderPlatform(md) {
     {label:'Booked',   right:true, w:'80px'},
     {label:'Target',   right:true, w:'70px'},
     {label:'Ach%',     right:true, w:'60px'},
-    {label:'vs LM',    right:true, w:'80px'},
-    {label:'vs LY',    right:true, w:'80px'},
+    {label:'LM Rev',   right:true, w:'80px'},
+    {label:'vs LM',    right:true, w:'72px'},
+    {label:'LY Rev',   right:true, w:'80px'},
+    {label:'vs LY',    right:true, w:'72px'},
     {label:'Clients',  right:true, w:'60px'},
   ];
 
@@ -1788,6 +1816,7 @@ function renderPlatform(md) {
     const cls = CURRENT_PLATFORM === p ? 'badge-green' : clsMap[p];
     let rev, bookedCr, clients, momPct, loyPct;
 
+    let lmRev, lyRev;
     if (anyPlatFilterActive) {
       const curr  = getFilteredDataForPlatform(p, md);
       const prior = getFilteredDataForPlatform(p, priorMd);
@@ -1795,14 +1824,20 @@ function renderPlatform(md) {
       rev      = curr.rev;
       bookedCr = curr.booked;
       clients  = curr.clients;
-      momPct   = prior.rev > 0 ? r2(((curr.rev - prior.rev) / prior.rev) * 100) : null;
-      loyPct   = ly.rev    > 0 ? r2(((curr.rev - ly.rev)    / ly.rev)    * 100) : null;
+      lmRev    = prior.rev > 0 ? prior.rev : null;
+      lyRev    = ly.rev    > 0 ? ly.rev    : null;
+      momPct   = lmRev !== null ? r2(((curr.rev - lmRev) / lmRev) * 100) : null;
+      loyPct   = lyRev !== null ? r2(((curr.rev - lyRev) / lyRev) * 100) : null;
     } else {
       rev      = pl.del_rev ?? 0;
       bookedCr = pl.booked_rev != null ? r2(pl.booked_rev) : null;
       clients  = pl.clients || 0;
       momPct   = pl.growth_vs_lm ?? null;
       loyPct   = pl.growth_vs_ly ?? null;
+      const priorPl = priorMd ? (priorMd.platform[p] || {}) : {};
+      const lyPl    = lyMd    ? (lyMd.platform[p]    || {}) : {};
+      lmRev = r2(platformRevFromStored(priorPl) || 0) > 0 ? r2(platformRevFromStored(priorPl)) : null;
+      lyRev = r2(platformRevFromStored(lyPl)    || 0) > 0 ? r2(platformRevFromStored(lyPl))    : null;
     }
 
     return '<tr style="' + (!isActive ? 'opacity:0.3' : '') + '">' +
@@ -1811,14 +1846,16 @@ function renderPlatform(md) {
       '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (bookedCr != null ? fmtNum(bookedCr) + ' Cr' : '—') + '</td>' +
       '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
       '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
+      '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (lmRev !== null ? fmtNum(lmRev) + ' Cr' : '—') + '</td>' +
       '<td style="text-align:right">' + growthBadge(momPct) + '</td>' +
+      '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (lyRev !== null ? fmtNum(lyRev) + ' Cr' : '—') + '</td>' +
       '<td style="text-align:right">' + growthBadge(loyPct) + '</td>' +
       '<td style="text-align:right;color:var(--ink-soft)">' + clients + '</td>' +
     '</tr>';
   }).join('');
 
   // Total row
-  let totalRev = 0, totalBooked = 0, totalClients = 0;
+  let totalRev = 0, totalBooked = 0, totalClients = 0, totalLmRev = 0, totalLyRev = 0;
   let totalMomNum = 0, totalMomDen = 0, totalLyNum = 0, totalLyDen = 0;
 
   platforms.forEach(p => {
@@ -1831,14 +1868,18 @@ function renderPlatform(md) {
       const prior = getFilteredDataForPlatform(p, priorMd);
       const ly    = getFilteredDataForPlatform(p, lyMd);
       rev = curr.rev; bookedCr = curr.booked; clients = curr.clients;
-      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; }
-      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    }
+      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; totalLmRev += prior.rev; }
+      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    totalLyRev += ly.rev;    }
     } else {
       rev      = pl.del_rev ?? 0;
       bookedCr = pl.booked_rev != null ? r2(pl.booked_rev) : null;
       clients  = pl.clients || 0;
-      if (pl.growth_vs_lm != null) { totalMomNum += rev * (pl.growth_vs_lm/100); totalMomDen += rev / (1 + pl.growth_vs_lm/100); }
-      if (pl.growth_vs_ly != null) { totalLyNum  += rev * (pl.growth_vs_ly/100); totalLyDen  += rev / (1 + pl.growth_vs_ly/100); }
+      const priorPl = priorMd ? (priorMd.platform[p] || {}) : {};
+      const lyPl    = lyMd    ? (lyMd.platform[p]    || {}) : {};
+      const pRev    = r2(platformRevFromStored(priorPl) || 0);
+      const lRev    = r2(platformRevFromStored(lyPl)    || 0);
+      if (pRev > 0) { totalMomNum += rev - pRev; totalMomDen += pRev; totalLmRev += pRev; }
+      if (lRev > 0) { totalLyNum  += rev - lRev; totalLyDen  += lRev; totalLyRev += lRev; }
     }
     totalRev += rev; totalBooked += bookedCr; totalClients += clients;
   });
@@ -1852,7 +1893,9 @@ function renderPlatform(md) {
     '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
+    '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalLmRev > 0 ? fmtNum(r2(totalLmRev)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right">' + growthBadge(totalMomPct) + '</td>' +
+    '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right">' + growthBadge(totalLyPct) + '</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">' + (CURRENT_PLATFORM === 'all' ? fmtInt(totalClients) : '—') + '</td>' +
   '</tr>';
@@ -2107,7 +2150,9 @@ clients: clientCount,
     {label:'Type / Format', w:'140px'},
     {label:'Del Rev',  right:true, w:'80px'},
     {label:'Booked',   right:true, w:'80px'},
+    {label:'LM Rev',   right:true, w:'80px'},
     {label:'vs LM',    right:true, w:'72px'},
+    {label:'LY Rev',   right:true, w:'80px'},
     {label:'vs LY',    right:true, w:'72px'},
     {label:'Clients',  right:true, w:'60px'},
     {label:'Share',    right:true, w:'52px'},
@@ -2118,7 +2163,7 @@ clients: clientCount,
   const shareDenom  = (videoData.rev + displayData.rev) || 1;
 
   let rows = '';
-  let totalRevSum = 0, totalBookedSum = 0;
+  let totalRevSum = 0, totalBookedSum = 0, totalLmRevSum = 0, totalLyRevSum = 0;
   let totalMomNum = 0, totalMomDen = 0, totalLyNum = 0, totalLyDen = 0;
 
   ['Video','Display'].forEach(adType => {
@@ -2143,7 +2188,9 @@ clients: clientCount,
       <td style="font-weight:500"><span class="badge ${badgeCls}">${adType}</span></td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${prior.rev > 0 ? fmtNum(r2(prior.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${ly.rev > 0 ? fmtNum(r2(ly.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
       <td style="text-align:right;color:var(--ink-soft)">${share}%</td>
@@ -2164,7 +2211,9 @@ clients: clientCount,
           <td style="padding-left:24px;color:var(--ink-soft);font-size:12px">${fmt}</td>
           <td style="text-align:right;font-family:var(--mono);font-size:12px">${fmtNum(fd.rev)} Cr</td>
           <td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-soft)">${fd.booked != null ? fmtNum(fd.booked) + ' Cr' : '—'}</td>
+          <td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-soft)">${fdPrior.rev > 0 ? fmtNum(r2(fdPrior.rev)) + ' Cr' : '—'}</td>
           <td style="text-align:right;font-size:12px">${growthBadge(fmtMomPct)}</td>
+          <td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-soft)">${fdLy.rev > 0 ? fmtNum(r2(fdLy.rev)) + ' Cr' : '—'}</td>
           <td style="text-align:right;font-size:12px">${growthBadge(fmtLoyPct)}</td>
           <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${fd.clients}</td>
           <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${fmtShare}%</td>
@@ -2175,8 +2224,8 @@ clients: clientCount,
     if (isTypeActive) {
       totalRevSum    += curr.rev;
       totalBookedSum += curr.booked;
-      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; }
-      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    }
+      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; totalLmRevSum += prior.rev; }
+      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    totalLyRevSum += ly.rev;    }
     }
   });
 
@@ -2192,7 +2241,9 @@ clients: clientCount,
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRevSum))} Cr</td>
     <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBookedSum > 0 ? fmtNum(r2(totalBookedSum)) + ' Cr' : '—'}</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLmRevSum > 0 ? fmtNum(r2(totalLmRevSum)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLyRevSum > 0 ? fmtNum(r2(totalLyRevSum)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
@@ -2316,14 +2367,16 @@ function renderCategories(md) {
     {label:'Category'},
     {label:'Del Rev', right:true, w:'80px'},
     {label:'Booked',  right:true, w:'80px'},
+    {label:'LM Rev',  right:true, w:'80px'},
     {label:'vs LM',   right:true, w:'72px'},
+    {label:'LY Rev',  right:true, w:'80px'},
     {label:'vs LY',   right:true, w:'72px'},
     {label:'Clients', right:true, w:'60px'},
     {label:'Share',   right:true, w:'52px'},
   ];
 
   let rows = '';
-  let totalRev = 0, totalBooked = 0;
+  let totalRev = 0, totalBooked = 0, totalLmRev = 0, totalLyRev = 0;
   let totalMomNum = 0, totalMomDen = 0, totalLyNum = 0, totalLyDen = 0;
 
   catList.forEach((cat, i) => {
@@ -2344,7 +2397,9 @@ function renderCategories(md) {
       <td style="font-weight:500">${cat.name} ${momPct !== null ? (momPct >= 20 ? '<span style="color:var(--green);font-size:11px">↑↑</span>' : momPct >= 5 ? '<span style="color:var(--green);font-size:11px">↑</span>' : momPct <= -20 ? '<span style="color:var(--red);font-size:11px">↓↓</span>' : momPct <= -5 ? '<span style="color:var(--red);font-size:11px">↓</span>' : '') : ''}</td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${prior.rev > 0 ? fmtNum(r2(prior.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${ly.rev > 0 ? fmtNum(r2(ly.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
       <td style="text-align:right;color:var(--ink-soft)">${share}%</td>
@@ -2353,8 +2408,8 @@ function renderCategories(md) {
     if (isActive) {
       totalRev    += curr.rev;
       totalBooked += curr.booked;
-      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; }
-      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    }
+      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; totalLmRev += prior.rev; }
+      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    totalLyRev += ly.rev;    }
     }
   });
 
@@ -2373,7 +2428,9 @@ function renderCategories(md) {
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRev))} Cr</td>
     <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—'}</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLmRev > 0 ? fmtNum(r2(totalLmRev)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
@@ -2397,6 +2454,8 @@ function renderCategories(md) {
           <span style="font-size:10px;font-weight:600;background:var(--amber);color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px">No Category</span>
         </td>
         <td style="text-align:right;font-family:var(--mono);font-weight:500;color:var(--amber)">${fmtNum(untaggedCatRev)} Cr</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
@@ -2515,14 +2574,16 @@ function renderAgencies(md) {
     {label:'Agency'},
     {label:'Del Rev', right:true, w:'80px'},
     {label:'Booked',  right:true, w:'80px'},
+    {label:'LM Rev',  right:true, w:'80px'},
     {label:'vs LM',   right:true, w:'72px'},
+    {label:'LY Rev',  right:true, w:'80px'},
     {label:'vs LY',   right:true, w:'72px'},
     {label:'Clients', right:true, w:'60px'},
     {label:'Share',   right:true, w:'52px'},
   ];
 
   let rows = '';
-  let totalRev = 0, totalBooked = 0;
+  let totalRev = 0, totalBooked = 0, totalLmRev = 0, totalLyRev = 0;
   let totalMomNum = 0, totalMomDen = 0, totalLyNum = 0, totalLyDen = 0;
 
   agList.forEach((ag, i) => {
@@ -2542,7 +2603,9 @@ function renderAgencies(md) {
       <td style="font-weight:500">${ag.name}</td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${prior.rev > 0 ? fmtNum(r2(prior.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${ly.rev > 0 ? fmtNum(r2(ly.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
       <td style="text-align:right;color:var(--ink-soft)">${share}%</td>
@@ -2551,8 +2614,8 @@ function renderAgencies(md) {
     if (isActive) {
       totalRev    += curr.rev;
       totalBooked += curr.booked;
-      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; }
-      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    }
+      if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; totalLmRev += prior.rev; }
+      if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    totalLyRev += ly.rev;    }
     }
   });
 
@@ -2570,7 +2633,9 @@ function renderAgencies(md) {
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRev))} Cr</td>
     <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—'}</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLmRev > 0 ? fmtNum(r2(totalLmRev)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
+    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
@@ -2594,6 +2659,8 @@ function renderAgencies(md) {
           <span style="font-size:10px;font-weight:600;background:var(--amber);color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px">No Agency</span>
         </td>
         <td style="text-align:right;font-family:var(--mono);font-weight:500;color:var(--amber)">${fmtNum(untaggedAgRev)} Cr</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
+        <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
