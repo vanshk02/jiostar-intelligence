@@ -1082,9 +1082,30 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     adjCTV    = r2(pureCTV    + mobCTV * ctvRatio);
     adjMobile = r2(pureMobile + mobCTV * mobRatio);
   } else {
-    const pureCTV    = r2(filteredClients.reduce((t,c) => t + (c.ctv_rev    ?? 0), 0));
-    const pureMobile = r2(filteredClients.reduce((t,c) => t + (c.mobile_rev ?? 0), 0));
-    const mobCTV     = r2(filteredClients.reduce((t,c) => t + (c.mobilectv_rev ?? 0), 0));
+    const _gCTV = (c) => {
+      const _f = CURRENT_FORMAT, _a = CURRENT_ADTYPE;
+      if (_f !== 'all') { const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null; return base ? (c[`ctv_${base}_rev`] ?? 0) : 0; }
+      if (_a === 'Video')   return c.ctv_video_rev   ?? 0;
+      if (_a === 'Display') return c.ctv_display_rev ?? 0;
+      return c.ctv_rev ?? 0;
+    };
+    const _gMob = (c) => {
+      const _f = CURRENT_FORMAT, _a = CURRENT_ADTYPE;
+      if (_f !== 'all') { const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null; return base ? (c[`mob_${base}_rev`] ?? 0) : 0; }
+      if (_a === 'Video')   return c.mob_video_rev   ?? 0;
+      if (_a === 'Display') return c.mob_display_rev ?? 0;
+      return c.mobile_rev ?? 0;
+    };
+    const _gMCTV = (c) => {
+      const _f = CURRENT_FORMAT, _a = CURRENT_ADTYPE;
+      if (_f !== 'all') { const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null; return base ? (c[`mctv_${base}_rev`] ?? 0) : 0; }
+      if (_a === 'Video')   return c.mobilectv_video_rev   ?? 0;
+      if (_a === 'Display') return c.mobilectv_display_rev ?? 0;
+      return c.mobilectv_rev ?? 0;
+    };
+    const pureCTV    = r2(filteredClients.reduce((t,c) => t + _gCTV(c),  0));
+    const pureMobile = r2(filteredClients.reduce((t,c) => t + _gMob(c),  0));
+    const mobCTV     = r2(filteredClients.reduce((t,c) => t + _gMCTV(c), 0));
     const pureTotal  = pureCTV + pureMobile;
     const ctvRatio   = pureTotal > 0 ? pureCTV    / pureTotal : 0.5;
     const mobRatio   = pureTotal > 0 ? pureMobile / pureTotal : 0.5;
@@ -1098,8 +1119,40 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     videoRev   = md.ad_type && md.ad_type.Video   ? md.ad_type.Video.del_rev   : 0;
     displayRev = md.ad_type && md.ad_type.Display ? md.ad_type.Display.del_rev : 0;
   } else {
-    videoRev   = r2(filteredClients.reduce((t,c) => t + (c.video_rev   ?? 0), 0));
-    displayRev = r2(filteredClients.reduce((t,c) => t + (c.display_rev ?? 0), 0));
+    const _vBases = ['preroll','midroll','integ','spots'];
+    const _dBases = ['billboard','breakout','pause','frames','fence','untagged'];
+    const _getVid = (c) => {
+      const _f = CURRENT_FORMAT, _p = CURRENT_PLATFORM;
+      if (_f !== 'all') {
+        const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null;
+        if (!base || !_vBases.includes(base)) return 0;
+        if (_p === 'CTV')        return c[`ctv_${base}_rev`]  ?? 0;
+        if (_p === 'Mobile')     return c[`mob_${base}_rev`]  ?? 0;
+        if (_p === 'Mobile+CTV') return c[`mctv_${base}_rev`] ?? 0;
+        return c[fk] ?? 0;
+      }
+      if (_p === 'CTV')        return c.ctv_video_rev        ?? 0;
+      if (_p === 'Mobile')     return c.mob_video_rev        ?? 0;
+      if (_p === 'Mobile+CTV') return c.mobilectv_video_rev  ?? 0;
+      return c.video_rev ?? 0;
+    };
+    const _getDisp = (c) => {
+      const _f = CURRENT_FORMAT, _p = CURRENT_PLATFORM;
+      if (_f !== 'all') {
+        const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null;
+        if (!base || !_dBases.includes(base)) return 0;
+        if (_p === 'CTV')        return c[`ctv_${base}_rev`]  ?? 0;
+        if (_p === 'Mobile')     return c[`mob_${base}_rev`]  ?? 0;
+        if (_p === 'Mobile+CTV') return c[`mctv_${base}_rev`] ?? 0;
+        return c[fk] ?? 0;
+      }
+      if (_p === 'CTV')        return c.ctv_display_rev        ?? 0;
+      if (_p === 'Mobile')     return c.mob_display_rev        ?? 0;
+      if (_p === 'Mobile+CTV') return c.mobilectv_display_rev  ?? 0;
+      return c.display_rev ?? 0;
+    };
+    videoRev   = r2(filteredClients.reduce((t,c) => t + _getVid(c),  0));
+    displayRev = r2(filteredClients.reduce((t,c) => t + _getDisp(c), 0));
   }
 
   // ── Biggest Mover — fully filter-aware ────────────────────────
@@ -1222,9 +1275,12 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       const tot = pC + pM; const cR = tot > 0 ? pC/tot : 0.5; const mR = tot > 0 ? pM/tot : 0.5;
       return { ctv: r2(pC + pMC*cR), mobile: r2(pM + pMC*mR) };
     }
-    const pC  = r2(pool.reduce((t,c) => t + (c.ctv_rev       ?? 0), 0));
-    const pM  = r2(pool.reduce((t,c) => t + (c.mobile_rev    ?? 0), 0));
-    const pMC = r2(pool.reduce((t,c) => t + (c.mobilectv_rev ?? 0), 0));
+    const _pCTV  = (c) => { const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`ctv_${base}_rev`]??0):0;} if(_a==='Video')return c.ctv_video_rev??0;if(_a==='Display')return c.ctv_display_rev??0;return c.ctv_rev??0; };
+    const _pMob  = (c) => { const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`mob_${base}_rev`]??0):0;} if(_a==='Video')return c.mob_video_rev??0;if(_a==='Display')return c.mob_display_rev??0;return c.mobile_rev??0; };
+    const _pMCTV = (c) => { const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`mctv_${base}_rev`]??0):0;} if(_a==='Video')return c.mobilectv_video_rev??0;if(_a==='Display')return c.mobilectv_display_rev??0;return c.mobilectv_rev??0; };
+    const pC  = r2(pool.reduce((t,c) => t + _pCTV(c),  0));
+    const pM  = r2(pool.reduce((t,c) => t + _pMob(c),  0));
+    const pMC = r2(pool.reduce((t,c) => t + _pMCTV(c), 0));
     const tot = pC + pM; const cR = tot > 0 ? pC/tot : 0.5; const mR = tot > 0 ? pM/tot : 0.5;
     return { ctv: r2(pC + pMC*cR), mobile: r2(pM + pMC*mR) };
   };
@@ -1246,9 +1302,13 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       video:   monthData.ad_type?.Video?.del_rev   ?? null,
       display: monthData.ad_type?.Display?.del_rev ?? null
     };
+    const _vBs = ['preroll','midroll','integ','spots'];
+    const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
+    const _atVid  = (c) => { const _f=CURRENT_FORMAT,_p=CURRENT_PLATFORM; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;if(!base||!_vBs.includes(base))return 0;if(_p==='CTV')return c[`ctv_${base}_rev`]??0;if(_p==='Mobile')return c[`mob_${base}_rev`]??0;if(_p==='Mobile+CTV')return c[`mctv_${base}_rev`]??0;return c[fk]??0;} if(_p==='CTV')return c.ctv_video_rev??0;if(_p==='Mobile')return c.mob_video_rev??0;if(_p==='Mobile+CTV')return c.mobilectv_video_rev??0;return c.video_rev??0; };
+    const _atDisp = (c) => { const _f=CURRENT_FORMAT,_p=CURRENT_PLATFORM; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;if(!base||!_dBs.includes(base))return 0;if(_p==='CTV')return c[`ctv_${base}_rev`]??0;if(_p==='Mobile')return c[`mob_${base}_rev`]??0;if(_p==='Mobile+CTV')return c[`mctv_${base}_rev`]??0;return c[fk]??0;} if(_p==='CTV')return c.ctv_display_rev??0;if(_p==='Mobile')return c.mob_display_rev??0;if(_p==='Mobile+CTV')return c.mobilectv_display_rev??0;return c.display_rev??0; };
     return {
-      video:   r2(pool.reduce((t,c) => t + (c.video_rev   ?? 0), 0)),
-      display: r2(pool.reduce((t,c) => t + (c.display_rev ?? 0), 0))
+      video:   r2(pool.reduce((t,c) => t + _atVid(c),  0)),
+      display: r2(pool.reduce((t,c) => t + _atDisp(c), 0))
     };
   };
   const priorAT = getAdTypeRev(priorPool, priorMd);
@@ -2795,14 +2855,17 @@ function renderClients(md) {
       const bBooked    = (c.booked_rev != null && c.del_rev > 0 && b.del_rev > 0)
         ? r2(c.booked_rev * (b.del_rev / c.del_rev)) : null;
       return `<tr class="brand-row" id="brands-${i}" style="display:none;background:var(--surface)">
-        <td></td>
-        <td colspan="2" style="padding-left:28px;font-size:11px;color:var(--ink-soft)">↳ ${b.name}</td>
-        <td style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${fmtNum(b.del_rev)} Cr</td>
-        <td style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${bBooked != null ? fmtNum(bBooked) + ' Cr' : '—'}</td>
-        <td style="text-align:right;font-size:11px">${growthBadge(bMomPct)}</td>
-        <td style="text-align:right;font-size:11px">${growthBadge(bLoyPct)}</td>
-        <td colspan="8"></td>
-      </tr>`;
+    <td colspan="15" style="padding:5px 12px 5px 44px;border-bottom:1px solid var(--surface-2)">
+      <div style="display:flex;align-items:center;gap:14px">
+        <span style="font-size:11px;color:var(--ink-soft);min-width:270px">↳ ${b.name}</span>
+        <span style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink)">${fmtNum(b.del_rev)} Cr</span>
+        ${bBooked != null ? `<span style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">bkd ${fmtNum(bBooked)} Cr</span>` : '<span style="color:var(--ink-faint);font-size:11px">—</span>'}
+        ${bMomPct !== null ? `<span style="font-size:10px;color:var(--ink-soft)">vs LM</span>${growthBadge(bMomPct)}` : ''}
+        ${bLoyPct !== null ? `<span style="font-size:10px;color:var(--ink-soft)">vs LY</span>${growthBadge(bLoyPct)}` : ''}
+      </div>
+    </td>
+  </tr>`;
+    
     }).join('') : '';
 
     const expandBtn = hasBrands
