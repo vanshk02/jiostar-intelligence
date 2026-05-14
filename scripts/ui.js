@@ -1539,6 +1539,10 @@ function renderBU(md) {
       const fk   = formatFieldKey(f);
       const base = fk ? fk.replace('_rev', '') : null;
       if (!base) return 0;
+      const _vBs = ['preroll','midroll','integ','spots'];
+      const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
+      if (a === 'Video'   && _dBs.includes(base)) return 0;
+      if (a === 'Display' && _vBs.includes(base)) return 0;
       if (p === 'CTV')         return b['ctv_'  + base + '_rev'] ?? 0;
       if (p === 'Mobile')      return b['mob_'  + base + '_rev'] ?? 0;
       if (p === 'Mobile+CTV')  return b['mctv_' + base + '_rev'] ?? 0;
@@ -1565,6 +1569,10 @@ function renderBU(md) {
       const fk = formatFieldKey(f);
       const base = fk ? fk.replace('_rev', '') : null;
       if (!base) return 0;
+      const _vBs = ['preroll','midroll','integ','spots'];
+      const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
+      if (a === 'Video'   && _dBs.includes(base)) return 0;
+      if (a === 'Display' && _vBs.includes(base)) return 0;
       if (p === 'CTV')         return c['ctv_' + base + '_rev']      ?? 0;
     if (p === 'Mobile')      return c['mob_' + base + '_rev']      ?? 0;
     if (p === 'Mobile+CTV')  return c['mctv_' + base + '_rev'] ?? 0;
@@ -1629,10 +1637,15 @@ function renderBU(md) {
       else if (a==='Display')                   { booked = b.display_booked;           clientCount = b.display_clients; }
       else                                      { booked = b.booked_rev;               clientCount = b.clients; }
 
+      const _buClients = (monthData.top_clients || []).filter(c =>
+        buName === 'Others'
+          ? !MAIN_BUS.includes(c.bu) && clientRev(c) > 0
+          : c.bu === buName && clientRev(c) > 0
+      );
       return {
 rev:     r2(buRevFromStored(b)),
 booked:  booked != null ? r2(booked) : null,
-clients: clientCount || 0,
+clients: _buClients.length,
 };
     }
 
@@ -1643,9 +1656,9 @@ clients: clientCount || 0,
     if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
     const hasBooked = clients.some(c => c.booked_rev != null);
 return {
-rev:     r2(clients.reduce((t, c) => t + clientRev(c), 0)),
-booked:  hasBooked ? r2(clients.reduce((t, c) => t + (c.booked_rev || 0), 0)) : null,
-clients: clients.length,
+  rev:     r2(clients.reduce((t, c) => t + clientRev(c), 0)),
+  booked:  hasBooked ? r2(clients.reduce((t, c) => t + (c.del_rev > 0 ? (c.booked_rev || 0) * (clientRev(c) / c.del_rev) : 0), 0)) : null,
+  clients: clients.filter(c => clientRev(c) > 0).length,
 };
   };
 
@@ -1773,7 +1786,15 @@ function renderPlatform(md) {
 
   const platformRevFromStored = (pl) => {
     const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
-    if (f !== 'all') { const fk = formatFieldKey(f); return fk ? (pl[fk] ?? 0) : 0; }
+    if (f !== 'all') {
+      const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+      if (!base) return 0;
+      const _vBs = ['preroll','midroll','integ','spots'];
+      const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
+      if (a === 'Video'   && _dBs.includes(base)) return 0;
+      if (a === 'Display' && _vBs.includes(base)) return 0;
+      return pl[fk] ?? 0;
+    }
     if (a === 'Video')   return pl.video_rev   ?? 0;
     if (a === 'Display') return pl.display_rev ?? 0;
     return pl.del_rev ?? 0;
@@ -1835,7 +1856,7 @@ function renderPlatform(md) {
       if (f !== 'all') {
         const fk   = formatFieldKey(f);
         const base = fk ? fk.replace('_rev', '') : null;
-        if (!base) { val = 0; }
+        if (!base || (a==='Video' && ['billboard','breakout','pause','frames','fence','untagged'].includes(base)) || (a==='Display' && ['preroll','midroll','integ','spots'].includes(base))) { val = 0; }
         else if (platformName === 'CTV')         val = c['ctv_'  + base + '_rev'] || 0;
         else if (platformName === 'Mobile')      val = c['mob_'  + base + '_rev'] || 0;
         else if (platformName === 'Mobile+CTV')  val = c['mctv_' + base + '_rev'] || 0;
@@ -1870,12 +1891,12 @@ function renderPlatform(md) {
 
       if (activeVal > 0) {
         platClientCount++;
-        bookedSum += (c.booked_rev || 0);
+        bookedSum += c.del_rev > 0 ? (c.booked_rev || 0) * (activeVal / c.del_rev) : 0;
       }
     });
     // Booked: use stored BU fields scoped to platform — never sum from clients (over-counts)
     let booked;
-    const buData = CURRENT_BU !== 'all' ? monthData.bu[CURRENT_BU] || {} : null;
+    const buData = (CURRENT_BU !== 'all' && CURRENT_CATEGORY === 'all' && CURRENT_AGENCY === 'all') ? monthData.bu[CURRENT_BU] || {} : null;
     if (buData) {
       const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
       if (f !== 'all') {
@@ -2024,6 +2045,10 @@ function renderAdType(md) {
       const fk = formatFieldKey(f);
       const base = fk ? fk.replace('_rev','') : null;
       if (!base) return 0;
+      const _vBs = ['preroll','midroll','integ','spots'];
+      const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
+      if (isVideo  && _dBs.includes(base)) return 0;
+      if (!isVideo && _vBs.includes(base)) return 0;
       if (p === 'CTV')        return b[`ctv_${base}_rev`]  ?? 0;
       if (p === 'Mobile')     return b[`mob_${base}_rev`]  ?? 0;
       if (p === 'Mobile+CTV') return b[`mctv_${base}_rev`] ?? 0;
@@ -2369,6 +2394,10 @@ function renderCategories(md) {
       const fk = formatFieldKey(f);
       const base = fk ? fk.replace('_rev','') : null;
       if (!base) return 0;
+      const _vBs = ['preroll','midroll','integ','spots'];
+      const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
+      if (a === 'Video'   && _dBs.includes(base)) return 0;
+      if (a === 'Display' && _vBs.includes(base)) return 0;
       if (p === 'CTV')        return c[`ctv_${base}_rev`]  ?? 0;
       if (p === 'Mobile')     return c[`mob_${base}_rev`]  ?? 0;
       if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`] ?? 0;
@@ -2458,10 +2487,11 @@ function renderCategories(md) {
   };
 
   // ── Build rows ──────────────────────────────────────────────────────────
-  const catList = md.categories || [];
-
-  // Compute all revs first so share denominator is based on filtered total
-  const allRevs    = catList.map(cat => getCatData(cat.name, md));
+  const catListRaw = md.categories || [];
+  const allRevsRaw = catListRaw.map(cat => getCatData(cat.name, md));
+  const catPairs   = catListRaw.map((cat, i) => ({ cat, rev: allRevsRaw[i] })).sort((a, b) => b.rev.rev - a.rev.rev);
+  const catList    = catPairs.map(p => p.cat);
+  const allRevs    = catPairs.map(p => p.rev);
   const shareDenom = allRevs.reduce((t, d) => t + d.rev, 0) || 1;
 
   const headers = [
@@ -2584,6 +2614,10 @@ function renderAgencies(md) {
       const fk = formatFieldKey(f);
       const base = fk ? fk.replace('_rev','') : null;
       if (!base) return 0;
+      const _vBs = ['preroll','midroll','integ','spots'];
+      const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
+      if (a === 'Video'   && _dBs.includes(base)) return 0;
+      if (a === 'Display' && _vBs.includes(base)) return 0;
       if (p === 'CTV')        return c[`ctv_${base}_rev`]  ?? 0;
       if (p === 'Mobile')     return c[`mob_${base}_rev`]  ?? 0;
       if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`] ?? 0;
@@ -2643,10 +2677,11 @@ function renderAgencies(md) {
     baseClients.forEach(c => {
       // Determine if this client belongs to this agency and at what scale
       let agScale;
-      if (c.agency === agName) {
+      if (c.agency_rev_map && Object.keys(c.agency_rev_map).length > 0 && c.del_rev > 0) {
+        agScale = (c.agency_rev_map[agName] || 0) / c.del_rev;
+        if (agScale <= 0) return;
+      } else if (c.agency === agName) {
         agScale = 1;
-      } else if (c.agency_rev_map && c.agency_rev_map[agName] > 0 && c.del_rev > 0) {
-        agScale = c.agency_rev_map[agName] / c.del_rev;
       } else {
         return;
       }
@@ -2666,9 +2701,11 @@ function renderAgencies(md) {
   };
 
   // ── Build rows ──────────────────────────────────────────────────────────
-  const agList = md.agencies || [];
-
-  const allRevs    = agList.map(ag => getAgData(ag.name, md));
+  const agListRaw  = md.agencies || [];
+  const allRevsRaw = agListRaw.map(ag => getAgData(ag.name, md));
+  const agPairs    = agListRaw.map((ag, i) => ({ ag, rev: allRevsRaw[i] })).sort((a, b) => b.rev.rev - a.rev.rev);
+  const agList     = agPairs.map(p => p.ag);
+  const allRevs    = agPairs.map(p => p.rev);
   const shareDenom = allRevs.reduce((t, d) => t + d.rev, 0) || 1;
 
   const headers = [
