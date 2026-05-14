@@ -487,9 +487,10 @@ function renderFlags(md) {
     }).join('');
 }
 // ── Diagnostic Drill-down ─────────────────────────
-function openDiagDrilldown(type, name, pct) {
+function openDiagDrilldown(type, name, pct, showLY = false) {
   const md      = DATA.months[CURRENT_MONTH]; if (!md) return;
   const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)]; if (!priorMd) return;
+  const lyMd = DATA.months[lyMonthKey(CURRENT_MONTH)] || null;
 
   // Get revenue for a client given entity type
   const getEntityRev = (c) => {
@@ -571,22 +572,28 @@ function openDiagDrilldown(type, name, pct) {
     <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div>
         <div style="font-size:16px;font-weight:600;color:var(--ink)">${name} — Client Breakdown</div>
-        <div style="font-size:12px;color:var(--ink-soft);margin-top:3px">${type} · ${md.label} vs ${priorMd.label}</div>
-        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <span style="font-size:13px;font-weight:600;color:${pctColor}">${sign}${pct}% overall</span>
-          ${actualDelta !== null ? `<span style="font-size:12px;font-weight:600;color:${actualDelta>=0?'var(--green)':'var(--red)'};font-family:var(--mono)">${actualDelta>=0?'+':''}${fmtNum(actualDelta)} Cr actual move</span>` : ''}
-        </div>
-        <div style="margin-top:6px;font-size:11px;color:var(--ink-soft);background:var(--surface);padding:5px 8px;border-radius:6px;border:1px solid var(--border)">
-          ⚠️ Breakdown below covers <strong>top clients only</strong> — smaller clients not in the list may account for the remaining gap
-        </div>
-        <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap">
-          ${totalDelta < 0 ? `<span style="font-size:12px;color:var(--red);font-family:var(--mono)">${fmtNum(totalDelta)} Cr from churned + declined (top clients)</span>` : ''}
-          ${totalPositive > 0 ? `<span style="font-size:12px;color:var(--green);font-family:var(--mono)">+${fmtNum(totalPositive)} Cr from grew + new (top clients)</span>` : ''}
+        <div id="diag-stats">
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:3px">${type} · ${md.label} vs ${priorMd.label}</div>
+          <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:13px;font-weight:600;color:${pctColor}">${sign}${pct}% overall</span>
+            ${actualDelta !== null ? `<span style="font-size:12px;font-weight:600;color:${actualDelta>=0?'var(--green)':'var(--red)'};font-family:var(--mono)">${actualDelta>=0?'+':''}${fmtNum(actualDelta)} Cr actual move</span>` : ''}
+          </div>
+          <div style="margin-top:6px;font-size:11px;color:var(--ink-soft);background:var(--surface);padding:5px 8px;border-radius:6px;border:1px solid var(--border)">
+            ⚠️ Breakdown below covers <strong>top clients only</strong> — smaller clients not in the list may account for the remaining gap
+          </div>
+          <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap">
+            ${totalDelta < 0 ? `<span style="font-size:12px;color:var(--red);font-family:var(--mono)">${fmtNum(totalDelta)} Cr from churned + declined (top clients)</span>` : ''}
+            ${totalPositive > 0 ? `<span style="font-size:12px;color:var(--green);font-family:var(--mono)">+${fmtNum(totalPositive)} Cr from grew + new (top clients)</span>` : ''}
+          </div>
         </div>
       </div>
       <button onclick="closeDiagDrilldown()" style="background:none;border:none;font-size:18px;color:var(--ink-soft);cursor:pointer;padding:4px 8px;border-radius:6px;line-height:1">✕</button>
-    </div>`;
-
+    </div>
+    ${showLY && lyMd ? `<div style="display:flex;gap:6px;margin-top:10px">
+      <button id="diag-tab-lm" onclick="switchDiagTab('lm')" style="padding:4px 14px;border-radius:20px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--font)">vs Last Month</button>
+      <button id="diag-tab-ly" onclick="switchDiagTab('ly')" style="padding:4px 14px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--ink-soft);font-size:12px;font-weight:500;cursor:pointer;font-family:var(--font)">vs Last Year</button>
+    </div>` : ''}`;
+    
   // ── Client table builder ──────────────────────────────────
   const clientTable = (list, emptyMsg) => {
     if (!list.length) return `<div style="padding:12px 0;color:var(--ink-soft);font-size:12px">${emptyMsg}</div>`;
@@ -629,22 +636,44 @@ function openDiagDrilldown(type, name, pct) {
       </div>
     </div>`;
 
-  document.getElementById('diag-content').innerHTML =
-    section('🔴', 'Churned',
-      `Were active in ${priorMd.label}, zero spend this month`,
-      'var(--red-soft)', churned, 'No churned clients — good sign!') +
+  _diagLMContent =
+    section('🔴', 'Churned',     `Were active in ${priorMd.label}, zero spend this month`,  'var(--red-soft)',       churned,    'No churned clients — good sign!') +
+    section('🟡', 'Declined',    `Still active but reduced spend vs ${priorMd.label}`,        'var(--amber-soft)',     declined,   'No declines — all active clients held or grew.') +
+    section('🆕', 'New Clients', `Weren't active in ${priorMd.label}, appeared this month`,  'rgba(59,130,246,0.08)', newClients, `No new clients in ${md.label}.`) +
+    section('🟢', 'Grew',        `Active in both months, revenue increased`,                   'var(--green-soft)',     grew,       'No clients grew — all were flat or declined.');
 
-    section('🟡', 'Declined',
-      `Still active but reduced spend vs ${priorMd.label}`,
-      'var(--amber-soft)', declined, 'No declines — all active clients held or grew.') +
+  if (showLY && lyMd) {
+    const lyClientsF = filterForEntity(lyMd.top_clients || []);
+    const lyNames    = new Set(lyClientsF.map(c => c.name));
+    const lyRevMap   = Object.fromEntries(lyClientsF.map(c => [c.name, getEntityRev(c)]));
+    const churnedLY  = lyClientsF.filter(c => !currNames.has(c.name) && getEntityRev(c)>0).map(c=>({name:c.name,bu:c.bu||'—',category:c.category||'—',priorRev:getEntityRev(c),currRev:0,delta:-getEntityRev(c)})).sort((a,b)=>a.delta-b.delta);
+    const declinedLY = currClients.map(c=>({name:c.name,bu:c.bu||'—',category:c.category||'—',priorRev:lyRevMap[c.name]??0,currRev:getEntityRev(c),delta:r2(getEntityRev(c)-(lyRevMap[c.name]??0))})).filter(c=>c.delta<-0.01&&c.priorRev>0).sort((a,b)=>a.delta-b.delta);
+    const grewLY     = currClients.map(c=>({name:c.name,bu:c.bu||'—',category:c.category||'—',priorRev:lyRevMap[c.name]??0,currRev:getEntityRev(c),delta:r2(getEntityRev(c)-(lyRevMap[c.name]??0))})).filter(c=>c.delta>0.01).sort((a,b)=>b.delta-a.delta);
+    const newLY      = currClients.filter(c=>!lyNames.has(c.name)&&getEntityRev(c)>0.01).map(c=>({name:c.name,bu:c.bu||'—',category:c.category||'—',priorRev:0,currRev:getEntityRev(c),delta:getEntityRev(c)})).sort((a,b)=>b.delta-a.delta);
+    _diagLYContent =
+      section('🔴', 'Churned',     `Were active in ${lyMd.label}, zero spend this month`,  'var(--red-soft)',       churnedLY,  'No churned clients!') +
+      section('🟡', 'Declined',    `Still active but reduced spend vs ${lyMd.label}`,        'var(--amber-soft)',     declinedLY, 'No declines.') +
+      section('🆕', 'New Clients', `Weren't active in ${lyMd.label}, appeared this month`,  'rgba(59,130,246,0.08)', newLY,      'No new clients.') +
+      section('🟢', 'Grew',        `Active in both, revenue increased vs ${lyMd.label}`,     'var(--green-soft)',     grewLY,     'No clients grew.');
+    const lyActCurr  = type==='Category' ? (md.categories||[]).find(c=>c.name===name)?.del_rev??null : type==='Agency' ? (md.agencies||[]).find(a=>a.name===name)?.del_rev??null : null;
+    const lyActPrior = type==='Category' ? (lyMd.categories||[]).find(c=>c.name===name)?.del_rev??null : type==='Agency' ? (lyMd.agencies||[]).find(a=>a.name===name)?.del_rev??null : null;
+    const lyActDelta = lyActCurr!==null&&lyActPrior!==null ? r2(lyActCurr-lyActPrior) : null;
+    const lyPct_     = lyActCurr!==null&&lyActPrior!==null&&lyActPrior>0 ? r2(((lyActCurr-lyActPrior)/lyActPrior)*100) : 0;
+    const lyTotNeg   = r2([...churnedLY,...declinedLY].reduce((t,c)=>t+c.delta,0));
+    const lyTotPos   = r2([...grewLY,...newLY].reduce((t,c)=>t+c.delta,0));
+    const lyPctCol_  = lyPct_<=-10?'var(--red)':lyPct_>=10?'var(--green)':'var(--amber)';
+    _diagLYStats = '<div style="font-size:12px;color:var(--ink-soft);margin-top:3px">'+type+' \u00b7 '+md.label+' vs '+lyMd.label+'</div>'
+      +'<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span style="font-size:13px;font-weight:600;color:'+lyPctCol_+'">'+(lyPct_>=0?'+':'')+lyPct_+'% overall</span>'+(lyActDelta!==null?'<span style="font-size:12px;font-weight:600;color:'+(lyActDelta>=0?'var(--green)':'var(--red)')+';font-family:var(--mono)">'+(lyActDelta>=0?'+':'')+fmtNum(lyActDelta)+' Cr actual move</span>':'')+'</div>'
+      +'<div style="margin-top:6px;font-size:11px;color:var(--ink-soft);background:var(--surface);padding:5px 8px;border-radius:6px;border:1px solid var(--border)">⚠️ Breakdown below covers <strong>top clients only</strong> — smaller clients not in the list may account for the remaining gap</div>'
+      +'<div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap">'+(lyTotNeg<0?'<span style="font-size:12px;color:var(--red);font-family:var(--mono)">'+fmtNum(lyTotNeg)+' Cr from churned + declined (top clients)</span>':'')+(lyTotPos>0?'<span style="font-size:12px;color:var(--green);font-family:var(--mono)">+'+fmtNum(lyTotPos)+' Cr from grew + new (top clients)</span>':'')+'</div>';
+  }
 
-    section('🆕', 'New Clients',
-      `Weren't active in ${priorMd.label}, appeared this month`,
-      'rgba(59,130,246,0.08)', newClients, `No new clients in ${md.label}.`) +
+  _diagLMStats = '<div style="font-size:12px;color:var(--ink-soft);margin-top:3px">'+type+' \u00b7 '+md.label+' vs '+priorMd.label+'</div>'
+    +'<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span style="font-size:13px;font-weight:600;color:'+pctColor+'">'+sign+pct+'% overall</span>'+(actualDelta!==null?'<span style="font-size:12px;font-weight:600;color:'+(actualDelta>=0?'var(--green)':'var(--red)')+';font-family:var(--mono)">'+(actualDelta>=0?'+':'')+fmtNum(actualDelta)+' Cr actual move</span>':'')+'</div>'
+    +'<div style="margin-top:6px;font-size:11px;color:var(--ink-soft);background:var(--surface);padding:5px 8px;border-radius:6px;border:1px solid var(--border)">⚠️ Breakdown below covers <strong>top clients only</strong> — smaller clients not in the list may account for the remaining gap</div>'
+    +'<div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap">'+(totalDelta<0?'<span style="font-size:12px;color:var(--red);font-family:var(--mono)">'+fmtNum(totalDelta)+' Cr from churned + declined (top clients)</span>':'')+(totalPositive>0?'<span style="font-size:12px;color:var(--green);font-family:var(--mono)">+'+fmtNum(totalPositive)+' Cr from grew + new (top clients)</span>':'')+'</div>';
 
-    section('🟢', 'Grew',
-      `Active in both months, revenue increased`,
-      'var(--green-soft)', grew, 'No clients grew — all were flat or declined.');
+  document.getElementById('diag-content').innerHTML = _diagLMContent;
 
   // ── Open drawer ───────────────────────────────────────────
   const overlay = document.getElementById('diag-overlay');
@@ -662,10 +691,23 @@ function closeDiagDrilldown() {
   drawer.classList.remove('open');
   document.body.style.overflow = '';
 }
+function switchDiagTab(tab) {
+  document.getElementById('diag-content').innerHTML = tab === 'lm' ? _diagLMContent : _diagLYContent;
+  const statsEl = document.getElementById('diag-stats');
+  if (statsEl) statsEl.innerHTML = tab === 'lm' ? _diagLMStats : _diagLYStats;
+  const lmBtn = document.getElementById('diag-tab-lm');
+  const lyBtn = document.getElementById('diag-tab-ly');
+  if (lmBtn) { lmBtn.style.background = tab==='lm'?'var(--accent)':'transparent'; lmBtn.style.color = tab==='lm'?'#fff':'var(--ink-soft)'; lmBtn.style.borderColor = tab==='lm'?'var(--accent)':'var(--border)'; }
+  if (lyBtn) { lyBtn.style.background = tab==='ly'?'var(--accent)':'transparent'; lyBtn.style.color = tab==='ly'?'#fff':'var(--ink-soft)'; lyBtn.style.borderColor = tab==='ly'?'var(--accent)':'var(--border)'; }
+}
 let buChart = null;
 let platformChart = null;
 let bubbleChart = null;
 let diveChart = null;
+let _diagLMContent = '';
+let _diagLYContent = '';
+let _diagLMStats = '';
+let _diagLYStats = '';
 
 function renderCharts(md) {
   const lyMd = DATA.months[lyMonthKey(CURRENT_MONTH)] || null;
@@ -2454,7 +2496,7 @@ function renderCategories(md) {
 
     rows += `<tr style="${!isActive ? 'opacity:0.3' : ''}">
       <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
-      <td style="font-weight:500">${cat.name} ${momPct !== null ? (momPct >= 20 ? '<span style="color:var(--green);font-size:11px">↑↑</span>' : momPct >= 5 ? '<span style="color:var(--green);font-size:11px">↑</span>' : momPct <= -20 ? '<span style="color:var(--red);font-size:11px">↓↓</span>' : momPct <= -5 ? '<span style="color:var(--red);font-size:11px">↓</span>' : '') : ''}</td>
+      <td style="font-weight:500;cursor:pointer" onclick="openDiagDrilldown('Category','${cat.name.replace(/'/g,"\\'")}',${momPct ?? 0},true)"><span style="color:var(--accent);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px">${cat.name}</span> ${momPct !== null ? (momPct >= 20 ? '<span style="color:var(--green);font-size:11px">↑↑</span>' : momPct >= 5 ? '<span style="color:var(--green);font-size:11px">↑</span>' : momPct <= -20 ? '<span style="color:var(--red);font-size:11px">↓↓</span>' : momPct <= -5 ? '<span style="color:var(--red);font-size:11px">↓</span>' : '') : ''}</td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${prior.rev > 0 ? fmtNum(r2(prior.rev)) + ' Cr' : '—'}</td>
@@ -2660,7 +2702,7 @@ function renderAgencies(md) {
 
     rows += `<tr style="${!isActive ? 'opacity:0.3' : ''}">
       <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
-      <td style="font-weight:500">${ag.name}</td>
+      <td style="font-weight:500;cursor:pointer" onclick="openDiagDrilldown('Agency','${ag.name.replace(/'/g,"\\'")}',${momPct ?? 0},true)"><span style="color:var(--accent);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px">${ag.name}</span></td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${prior.rev > 0 ? fmtNum(r2(prior.rev)) + ' Cr' : '—'}</td>
