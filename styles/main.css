@@ -853,6 +853,11 @@ body {
   to   { transform: translateX(0); }
 }
 
+#dive-drawer {
+  width: 65vw !important;
+  min-width: 720px;
+}
+
 #dive-drawer.open {
   display: flex !important;
   animation: slideInRight 0.25s cubic-bezier(0.4,0,0.2,1);
