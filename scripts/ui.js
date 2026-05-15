@@ -13,6 +13,7 @@ let CURRENT_ADTYPE   = 'all';
 let CURRENT_FORMAT   = 'all';
 let CURRENT_CATEGORY = 'all';
 let CURRENT_AGENCY   = 'all';
+let CURRENT_CLIENT   = 'all';
 let SEARCH_CLIENT = '';
 const MAIN_BUS = ['LCS1','LCS2','MM1','MM2'];
 let VIEW_MODE     = 'monthly';
@@ -257,6 +258,7 @@ async function loadData() {
     attachListeners();
     document.getElementById('month-select').value = CURRENT_MONTH;
     renderAll();
+    populateClientDatalist();
     initScrollSpy();
     document.getElementById('freshness-dot').className = 'freshness-dot ready';
     const d = new Date(DATA.generated_at);
@@ -330,11 +332,19 @@ function populateAgencyDropdown() {
 }
 function attachListeners() {
   document.getElementById('month-select').addEventListener('change', e => {
-    CURRENT_MONTH=e.target.value; CURRENT_CATEGORY='all'; CURRENT_AGENCY='all'; SEARCH_CLIENT='';
+    CURRENT_MONTH=e.target.value; CURRENT_CATEGORY='all'; CURRENT_AGENCY='all'; CURRENT_CLIENT='all'; SEARCH_CLIENT='';
+    const _m1=document.getElementById('client-filter-input'); if(_m1) _m1.value='';
+    const _m2=document.getElementById('client-filter-clear'); if(_m2) _m2.style.display='none';
     document.getElementById('category-select').value='all';
     document.getElementById('agency-select').value='all';
     populateCategoryDropdown(); populateAgencyDropdown(); renderAll();
   });
+  const _cfi = document.getElementById('client-filter-input');
+  if (_cfi) {
+    _cfi.addEventListener('input',  e => handleClientFilterInput(e.target.value));
+    _cfi.addEventListener('change', e => handleClientFilterInput(e.target.value));
+  }
+
   ['bu','platform','adtype','format','category','agency'].forEach(id => {
     document.getElementById(id+'-select').addEventListener('change', e => {
       if(id==='bu')       CURRENT_BU=e.target.value;
@@ -380,6 +390,7 @@ function renderFlags(md) {
     cs = filterClientsByBU(cs, CURRENT_BU);
     if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c => c.category === CURRENT_CATEGORY);
     if (CURRENT_AGENCY   !== 'all') cs = cs.filter(c => c.agency   === CURRENT_AGENCY);
+    if (CURRENT_CLIENT   !== 'all') cs = cs.filter(c => c.name     === CURRENT_CLIENT);
     return cs;
   };
 
@@ -1057,8 +1068,8 @@ function renderKPIs(md) {
 
   const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_PLATFORM !== 'all' ||
     CURRENT_ADTYPE !== 'all' || CURRENT_FORMAT !== 'all' ||
-    CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all';
-    const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+    CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
+  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
 
   // ── Get filtered clients pool ──────────────────────────────
   let filteredClients = (md.top_clients || []).slice();
@@ -1067,6 +1078,7 @@ function renderKPIs(md) {
     c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
   if (CURRENT_AGENCY !== 'all') filteredClients = filteredClients.filter(c =>
     c.agency === CURRENT_AGENCY || (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY] > 0));
+  if (CURRENT_CLIENT !== 'all') filteredClients = filteredClients.filter(c => c.name === CURRENT_CLIENT);
 
   // ── Client rev for platform/adtype/format filters ──────────
   const clientRevForFilters = (c) => {
@@ -1208,6 +1220,7 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     cs = filterClientsByBU(cs, CURRENT_BU);
     if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c => c.category === CURRENT_CATEGORY);
     if (CURRENT_AGENCY   !== 'all') cs = cs.filter(c => c.agency   === CURRENT_AGENCY);
+    if (CURRENT_CLIENT   !== 'all') cs = cs.filter(c => c.name     === CURRENT_CLIENT);
     return cs;
   };
 
@@ -1278,6 +1291,7 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
     if (CURRENT_AGENCY !== 'all') cs = cs.filter(c =>
       c.agency === CURRENT_AGENCY || (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY] > 0));
+    if (CURRENT_CLIENT !== 'all') cs = cs.filter(c => c.name === CURRENT_CLIENT);
     return cs;
   };
   const priorPool = getFilteredPool(priorMd);
@@ -1590,7 +1604,7 @@ function renderBU(md) {
     return c.del_rev ?? 0;
   };
 
-  const needsClientFilter = CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all';
+  const needsClientFilter = CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
 
   const getFilteredData = (buName, monthData) => {
     if (!monthData) return { rev: 0, booked: 0, clients: 0 };
@@ -1649,11 +1663,12 @@ clients: _buClients.length,
 };
     }
 
-    // Category/Agency filter active — aggregate from top_clients
+    // Category/Agency/Client filter active — aggregate from top_clients
     let clients = (monthData.top_clients || []).slice();
     clients = filterClientsByBU(clients, buName);
     if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
     if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
+    if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
     const hasBooked = clients.some(c => c.booked_rev != null);
 return {
   rev:     r2(clients.reduce((t, c) => t + clientRev(c), 0)),
@@ -1663,7 +1678,7 @@ return {
   };
 
   const anyFilterActive = CURRENT_PLATFORM !== 'all' || CURRENT_ADTYPE !== 'all'
-    || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_FORMAT !== 'all';
+    || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_FORMAT !== 'all' || CURRENT_CLIENT !== 'all';
 
   const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
   const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
@@ -1825,8 +1840,8 @@ function renderPlatform(md) {
     return pl.clients;
   };
 
-  const needsClientFilterPlat = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all';
-  const anyPlatFilterActive   = needsClientFilterPlat || CURRENT_ADTYPE !== 'all' || CURRENT_FORMAT !== 'all';
+  const needsClientFilterPlat = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
+  const anyPlatFilterActive   = needsClientFilterPlat || CURRENT_ADTYPE !== 'all' || CURRENT_FORMAT !== 'all' || CURRENT_CLIENT !== 'all';
 
   const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
   const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
@@ -1847,6 +1862,7 @@ function renderPlatform(md) {
     clients = filterClientsByBU(clients, CURRENT_BU);
     if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
     if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
+    if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
 
     const platKey = platformName === 'CTV' ? 'ctv_rev' : platformName === 'Mobile' ? 'mobile_rev' : 'mobilectv_rev';
     const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
@@ -2036,8 +2052,8 @@ function renderAdType(md) {
   const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
 
   const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
-  const needsClientFilter = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all';
-  const anyFilterActive   = needsClientFilter || p !== 'all' || f !== 'all';
+  const needsClientFilter = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
+  const anyFilterActive   = needsClientFilter || p !== 'all' || f !== 'all' || CURRENT_CLIENT !== 'all';
   const activeBUs = CURRENT_BU !== 'all' ? [CURRENT_BU] : allBUs;
 
   const buAdTypeRev = (b, isVideo) => {
@@ -2147,6 +2163,7 @@ function renderAdType(md) {
       c.agency === CURRENT_AGENCY ||
       (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY] > 0)
     );
+    if (CURRENT_CLIENT !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
     return clients;
   };
 
@@ -2386,7 +2403,7 @@ function renderCategories(md) {
 
   const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
   const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_AGENCY !== 'all' ||
-                          p !== 'all' || a !== 'all' || f !== 'all';
+                          p !== 'all' || a !== 'all' || f !== 'all' || CURRENT_CLIENT !== 'all';
 
   // ── Client rev for platform × adtype × format filters (no category scaling) ──
   const clientRevForFilters = (c) => {
@@ -2430,6 +2447,7 @@ function renderCategories(md) {
       c.agency === CURRENT_AGENCY ||
       (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY] > 0)
     );
+    if (CURRENT_CLIENT !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
     return clients;
   };
 
@@ -2456,16 +2474,14 @@ function renderCategories(md) {
     const clientSet = new Set();
 
     baseClients.forEach(c => {
-      // Determine if this client belongs to this category and at what scale
       let catScale;
-      if (c.category === catName) {
-        // Primary category — full weight
+      if (c.category_rev_map && Object.keys(c.category_rev_map).length > 0 && c.del_rev > 0) {
+        catScale = (c.category_rev_map[catName] || 0) / c.del_rev;
+        if (catScale <= 0) return;
+      } else if (c.category === catName) {
         catScale = 1;
-      } else if (c.category_rev_map && c.category_rev_map[catName] > 0 && c.del_rev > 0) {
-        // Multi-category client — scale by this category's share of their total
-        catScale = c.category_rev_map[catName] / c.del_rev;
       } else {
-        return; // not in this category
+        return;
       }
 
       const filteredRev = clientRevForFilters(c);
@@ -2606,7 +2622,7 @@ function renderAgencies(md) {
 
   const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
   const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' ||
-                          p !== 'all' || a !== 'all' || f !== 'all';
+                          p !== 'all' || a !== 'all' || f !== 'all' || CURRENT_CLIENT !== 'all';
 
   // ── Client rev for platform × adtype × format filters only ─────────────
   const clientRevForFilters = (c) => {
@@ -2650,6 +2666,7 @@ function renderAgencies(md) {
       c.category === CURRENT_CATEGORY ||
       (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0)
     );
+    if (CURRENT_CLIENT !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
     return clients;
   };
 
@@ -2859,6 +2876,7 @@ function renderClients(md) {
     c.agency === CURRENT_AGENCY ||
     (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY] > 0)
   );
+  if (CURRENT_CLIENT !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
 
   // ── Attach filtered rev to each client, then sort + slice ────────────
   clients = clients.map(c => ({
@@ -3976,6 +3994,7 @@ function renderPillBar() {
     { key: 'format',   val: CURRENT_FORMAT,   label: CURRENT_FORMAT,   setter: () => { CURRENT_FORMAT='all';   document.getElementById('format-select').value='all'; } },
     { key: 'category', val: CURRENT_CATEGORY, label: CURRENT_CATEGORY, setter: () => { CURRENT_CATEGORY='all'; document.getElementById('category-select').value='all'; } },
     { key: 'agency',   val: CURRENT_AGENCY,   label: CURRENT_AGENCY,   setter: () => { CURRENT_AGENCY='all';   document.getElementById('agency-select').value='all'; } },
+    { key: 'client',   val: CURRENT_CLIENT,   label: '👤 ' + CURRENT_CLIENT, setter: () => { CURRENT_CLIENT='all'; const _pi=document.getElementById('client-filter-input'); if(_pi) _pi.value=''; const _pc=document.getElementById('client-filter-clear'); if(_pc) _pc.style.display='none'; } },
   ].filter(f => f.val !== 'all');
 
   if (!activeFilters.length) {
@@ -4012,6 +4031,45 @@ function clearAllFilters() {
   });
   renderAll();
 }
+function setClientFilter(name) {
+  CURRENT_CLIENT = (CURRENT_CLIENT === name) ? 'all' : name;
+  SEARCH_CLIENT  = '';
+  renderAll();
+}
+
+function populateClientDatalist() {
+  const list = document.getElementById('client-filter-datalist');
+  if (!list || !DATA) return;
+  const seen = new Set();
+  DATA.available_months.forEach(mkey => {
+    (DATA.months[mkey]?.top_clients || []).forEach(c => { if (c.name) seen.add(c.name); });
+  });
+  list.innerHTML = [...seen].sort()
+    .map(name => `<option value="${name.replace(/"/g,'&quot;')}"></option>`).join('');
+}
+
+function handleClientFilterInput(val) {
+  const clearBtn = document.getElementById('client-filter-clear');
+  if (!val.trim()) {
+    CURRENT_CLIENT = 'all';
+    if (clearBtn) clearBtn.style.display = 'none';
+    renderAll(); return;
+  }
+  if (clearBtn) clearBtn.style.display = 'block';
+  const list = document.getElementById('client-filter-datalist');
+  const options = list ? Array.from(list.options).map(o => o.value) : [];
+  if (options.includes(val.trim())) { CURRENT_CLIENT = val.trim(); renderAll(); }
+}
+
+function clearClientFilter() {
+  CURRENT_CLIENT = 'all';
+  const input = document.getElementById('client-filter-input');
+  if (input) input.value = '';
+  const btn = document.getElementById('client-filter-clear');
+  if (btn) btn.style.display = 'none';
+  renderAll();
+}
+
 function applyPreset(filterType, value) {
   // If already active — toggle off
   const isActive =
@@ -4021,7 +4079,9 @@ function applyPreset(filterType, value) {
 
   // Reset all first for clean state
   CURRENT_BU='all'; CURRENT_PLATFORM='all'; CURRENT_ADTYPE='all';
-  CURRENT_FORMAT='all'; CURRENT_CATEGORY='all'; CURRENT_AGENCY='all';
+  CURRENT_FORMAT='all'; CURRENT_CATEGORY='all'; CURRENT_AGENCY='all'; CURRENT_CLIENT='all';
+  const _ca1=document.getElementById('client-filter-input'); if(_ca1) _ca1.value='';
+  const _ca2=document.getElementById('client-filter-clear'); if(_ca2) _ca2.style.display='none';
   ['bu','platform','adtype','format','category','agency'].forEach(id => {
     document.getElementById(id+'-select').value = 'all';
   });

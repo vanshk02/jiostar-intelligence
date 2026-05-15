@@ -118,6 +118,18 @@
       </select>
     </div>
 
+    <div class="filter-group">
+      <label class="filter-label">Client</label>
+      <div style="position:relative">
+        <input type="text" id="client-filter-input" list="client-filter-datalist"
+          placeholder="Search client..."
+          autocomplete="off"
+          style="width:100%;background:var(--navy-light);border:1px solid var(--navy-border);border-radius:7px;color:rgba(255,255,255,0.85);font-family:var(--font);font-size:13px;padding:7px 28px 7px 10px;outline:none;box-sizing:border-box;transition:border-color 0.15s"/>
+        <datalist id="client-filter-datalist"></datalist>
+        <button id="client-filter-clear" onclick="clearClientFilter()" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:13px;line-height:1;padding:0">✕</button>
+      </div>
+    </div>
+
     <div class="sidebar-divider"></div>
 <div class="sidebar-section-label">Recent Queries</div>
 <div class="recent-queries" id="recent-queries" style="display:none;">
