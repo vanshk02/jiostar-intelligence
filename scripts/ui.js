@@ -3113,7 +3113,7 @@ function renderChurners() {
 
   const currentNames = new Set((md.top_clients || []).map(c => c.name));
 
-  const buildChurners = (refMd, refLabel, tag) => {
+  const buildChurners = (refMd) => {
     if (!refMd) return [];
     return (refMd.top_clients || [])
       .filter(c => (c.del_rev || 0) >= 0.1)
@@ -3126,101 +3126,84 @@ function renderChurners() {
         return true;
       })
       .map(c => {
-        const ctvRev   = c.ctv_rev       || 0;
-        const mobRev   = c.mobile_rev    || 0;
-        const mctvRev  = c.mobilectv_rev || 0;
+        const ctvRev  = c.ctv_rev       || 0;
+        const mobRev  = c.mobile_rev    || 0;
+        const mctvRev = c.mobilectv_rev || 0;
         const platPeak = Math.max(ctvRev, mobRev, mctvRev);
         const platLabel = platPeak === 0 ? '—'
-          : platPeak === ctvRev   ? 'CTV'
-          : platPeak === mobRev   ? 'Mobile'
+          : platPeak === ctvRev  ? 'CTV'
+          : platPeak === mobRev  ? 'Mobile'
           : 'Mobile+CTV';
         return {
-          name:      c.name,
-          bu:        c.bu || '—',
-          category:  c.category || '—',
-          agency:    c.agency   || '—',
-          lastRev:   c.del_rev  || 0,
-          lastPlat:  platLabel,
-          refLabel,
-          tag,
+          name:     c.name,
+          bu:       c.bu       || '—',
+          category: c.category || '—',
+          agency:   c.agency   || '—',
+          lastRev:  c.del_rev  || 0,
+          lastPlat: platLabel,
         };
-      });
+      })
+      .sort((a, b) => b.lastRev - a.lastRev);
   };
 
-  const lmChurners = buildChurners(priorMd, priorMd ? priorMd.label : 'LM', 'LM');
-  const lyChurners = buildChurners(lyMd,    lyMd    ? lyMd.label    : 'LY', 'LY');
+  const lmChurners = buildChurners(priorMd);
+  const lyChurners = buildChurners(lyMd);
 
-  // Merge: if a client appears in both, show LM tag (more urgent), deduplicate by name
-  const seen = new Set();
-  const churners = [];
-  [...lmChurners, ...lyChurners].forEach(c => {
-    if (seen.has(c.name)) return;
-    seen.add(c.name);
-    churners.push(c);
-  });
+  const renderChurnerBlock = (churners, title, accentColor, refLabel) => {
+    if (!churners.length) return `
+      <div style="flex:1;min-width:300px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:12px 14px;background:${accentColor}10;border-bottom:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:600;color:${accentColor};text-transform:uppercase;letter-spacing:0.05em">${title}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px">0 churned vs ${refLabel}</div>
+        </div>
+        <div style="padding:16px;color:var(--ink-soft);font-size:12px">No churned clients vs ${refLabel}.</div>
+      </div>`;
 
-  // Sort by last rev desc
-  churners.sort((a, b) => b.lastRev - a.lastRev);
+    const rowsHtml = churners.map((c, i) => {
+      const buCls   = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
+      const platCls = c.lastPlat === 'CTV' ? 'badge-green' : c.lastPlat === 'Mobile' ? 'badge-blue' : c.lastPlat === 'Mobile+CTV' ? 'badge-amber' : 'badge-gray';
+      return `<tr>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
+        <td style="font-weight:500;font-size:12px">${c.name}</td>
+        <td><span class="badge ${buCls}" style="font-size:9px">${c.bu}</span></td>
+        <td style="font-size:12px;color:var(--ink-soft)">${c.category}</td>
+        <td style="font-size:12px;color:var(--ink-soft)">${c.agency}</td>
+        <td><span class="badge ${platCls}" style="font-size:9px">${c.lastPlat}</span></td>
+        <td style="text-align:right;font-family:var(--mono);font-size:11px;font-weight:500">${fmtNum(c.lastRev)} Cr</td>
+      </tr>`;
+    }).join('');
 
-  if (!churners.length) {
-    panel.innerHTML = '<div style="padding:24px 18px;color:var(--ink-soft);font-size:13px">No churned clients vs last month or last year same month.</div>';
-    return;
-  }
+    return `
+      <div style="flex:1;min-width:300px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:12px 14px;background:${accentColor}10;border-bottom:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:600;color:${accentColor};text-transform:uppercase;letter-spacing:0.05em">${title}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px">${churners.length} churned vs ${refLabel}</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="ptable" style="font-size:12px">
+            <thead><tr>
+              <th style="min-width:24px">#</th>
+              <th>Client</th>
+              <th>BU</th>
+              <th>Category</th>
+              <th>Agency</th>
+              <th>Last Platform</th>
+              <th style="text-align:right;min-width:70px">Last Rev</th>
+            </tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`;
+  };
 
-  const headers = [
-    { label: '#',           w: '28px'  },
-    { label: 'Client'                  },
-    { label: 'BU',          w: '60px'  },
-    { label: 'Category'                },
-    { label: 'Agency'                  },
-    { label: 'Last seen',   w: '110px' },
-    { label: 'Last platform',w: '110px'},
-    { label: 'Last Rev',    right: true, w: '84px' },
-  ];
-
-  const ths = headers.map(h =>
-    `<th style="text-align:${h.right ? 'right' : 'left'};min-width:${h.w || 'auto'}">${h.label}</th>`
-  ).join('');
-
-  const rows = churners.map((c, i) => {
-    const buCls   = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
-    const platCls = c.lastPlat === 'CTV' ? 'badge-green'
-      : c.lastPlat === 'Mobile'          ? 'badge-blue'
-      : c.lastPlat === 'Mobile+CTV'      ? 'badge-amber'
-      : 'badge-gray';
-    const tagColor = c.tag === 'LM' ? 'var(--red)' : 'var(--amber)';
-    const tagBg    = c.tag === 'LM' ? '#EF444418' : '#F59E0B18';
-
-    return `<tr>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i + 1}</td>
-      <td style="font-weight:500">${c.name}</td>
-      <td><span class="badge ${buCls}">${c.bu}</span></td>
-      <td style="font-size:12px;color:var(--ink-soft)">${c.category}</td>
-      <td style="font-size:12px;color:var(--ink-soft)">${c.agency}</td>
-      <td>
-        <span style="font-size:11px;font-weight:500;color:${tagColor};background:${tagBg};padding:2px 8px;border-radius:10px">
-          ${c.tag === 'LM' ? '↓ Last month' : '↓ Last year'}
-        </span>
-        <span style="font-size:11px;color:var(--ink-soft);margin-left:4px">${c.refLabel}</span>
-      </td>
-      <td><span class="badge ${platCls}">${c.lastPlat}</span></td>
-      <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(c.lastRev)} Cr</td>
-    </tr>`;
-  }).join('');
-
-  // Summary line
-  const lmCount = lmChurners.length;
-  const lyCount = lyChurners.filter(c => !lmChurners.find(l => l.name === c.name)).length;
-  const summaryHtml = `<div style="padding:12px 18px;font-size:12px;color:var(--ink-soft);border-bottom:1px solid var(--border);display:flex;gap:16px">
-    <span>Comparing vs <strong style="color:var(--ink)">${priorMd ? priorMd.label : '—'}</strong> and <strong style="color:var(--ink)">${lyMd ? lyMd.label : '—'}</strong></span>
-    <span style="color:var(--red)">● ${lmCount} churned since last month</span>
-    <span style="color:var(--amber)">● ${lyCount} active last year, gone now</span>
-  </div>`;
-
-  panel.innerHTML = summaryHtml + `<div style="overflow-x:auto"><table class="ptable">
-    <thead><tr>${ths}</tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>`;
+  panel.innerHTML = `
+    <div style="padding:12px 18px;font-size:12px;color:var(--ink-soft);border-bottom:1px solid var(--border)">
+      Clients active in <strong style="color:var(--ink)">${priorMd?.label || '—'}</strong> or <strong style="color:var(--ink)">${lyMd?.label || '—'}</strong> but missing in <strong style="color:var(--ink)">${md.label}</strong>
+    </div>
+    <div style="display:flex;gap:14px;padding:14px;flex-wrap:wrap">
+      ${renderChurnerBlock(lmChurners, 'Churned vs Last Month', '#EF4444', priorMd?.label || '—')}
+      ${renderChurnerBlock(lyChurners, 'Churned vs Last Year Same Month', '#F59E0B', lyMd?.label || '—')}
+    </div>`;
 }
 
 
