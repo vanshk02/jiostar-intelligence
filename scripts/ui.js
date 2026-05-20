@@ -251,7 +251,7 @@ async function loadData() {
     const res = await fetch('data/summary.json');
     if (!res.ok) throw new Error('not found');
     DATA = await res.json();
-    CURRENT_MONTH = DATA.available_months[DATA.available_months.length - 1];
+    CURRENT_MONTH = DATA.current_month;
     populateMonthDropdown();
     populateCategoryDropdown();
     populateAgencyDropdown();
@@ -3116,6 +3116,7 @@ function renderChurners() {
   const buildChurners = (refMd, refLabel, tag) => {
     if (!refMd) return [];
     return (refMd.top_clients || [])
+      .filter(c => (c.del_rev || 0) >= 0.1)
       .filter(c => !currentNames.has(c.name))
       .filter(c => {
         if (CURRENT_BU !== 'all' && CURRENT_BU !== 'Others' && c.bu !== CURRENT_BU) return false;
@@ -3242,17 +3243,9 @@ function renderCohort() {
   const currentNames = new Map((md.top_clients || []).map(c => [c.name, c]));
 
   // All names that appeared in months BEFORE the given refMonth
-  const namesBefore = (beforeKey) => {
-    const s = new Set();
-    DATA.available_months.filter(k => k < beforeKey).forEach(k => {
-      (DATA.months[k]?.top_clients || []).forEach(c => s.add(c.name));
-    });
-    return s;
-  };
-
   const buildCohort = (refMd, refKey) => {
     if (!refMd) return { label: '—', clients: [] };
-    const prior = namesBefore(refKey);
+    const prior = new Set((DATA.months[priorMonthKey(refKey)]?.top_clients || []).map(c => c.name));
     const newClients = (refMd.top_clients || []).filter(c => !prior.has(c.name));
     const rows = newClients.map(c => {
       const curr    = currentNames.get(c.name);
@@ -3326,7 +3319,6 @@ function renderCohort() {
         <div style="padding:12px 14px;background:${accentColor}10;border-bottom:1px solid var(--border)">
           <div style="font-size:11px;font-weight:600;color:${accentColor};text-transform:uppercase;letter-spacing:0.05em">${title}</div>
           <div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px">${label} · ${total} new clients</div>
-          <div style="font-size:20px;font-weight:700;color:${retRate >= 60 ? 'var(--green)' : retRate >= 40 ? 'var(--amber)' : 'var(--red)'};margin-top:4px">${retRate}% retained</div>
           ${funnelHtml}
         </div>
         <div style="overflow-x:auto">
