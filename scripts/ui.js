@@ -3240,77 +3240,46 @@ function renderCohort() {
     return;
   }
 
-  const currentNames = new Map((md.top_clients || []).map(c => [c.name, c]));
-
-  // All names that appeared in months BEFORE the given refMonth
-  const buildCohort = (refMd, refKey) => {
+  // New clients = active in current month but NOT in ref month
+  const buildCohort = (refMd) => {
     if (!refMd) return { label: '—', clients: [] };
-    const prior = new Set((DATA.months[priorMonthKey(refKey)]?.top_clients || []).map(c => c.name));
-    const newClients = (refMd.top_clients || []).filter(c => !prior.has(c.name));
-    const rows = newClients.map(c => {
-      const curr    = currentNames.get(c.name);
-      const currRev = curr ? r2(curr.del_rev || 0) : 0;
-      const firstRev = r2(c.del_rev || 0);
-      const retained = currRev > 0;
-      const grew     = retained && currRev > firstRev;
-      const growthPct = retained && firstRev > 0
-        ? r2(((currRev - firstRev) / firstRev) * 100) : null;
-      return { name: c.name, bu: c.bu || '—', category: c.category || '—',
-               firstRev, currRev, retained, grew, growthPct };
-    }).sort((a, b) => b.firstRev - a.firstRev);
-    return { label: refMd.label, clients: rows };
+    const refNames = new Set((refMd.top_clients || []).map(c => c.name));
+    const newClients = (md.top_clients || [])
+      .filter(c => !refNames.has(c.name) && (c.del_rev || 0) > 0)
+      .map(c => ({
+        name:     c.name,
+        bu:       c.bu       || '—',
+        category: c.category || '—',
+        agency:   c.agency   || '—',
+        currRev:  r2(c.del_rev || 0),
+      }))
+      .sort((a, b) => b.currRev - a.currRev);
+    return { label: refMd.label, clients: newClients };
   };
 
-  const lmKey = priorMonthKey(CURRENT_MONTH);
-  const lyKey = lyMonthKey(CURRENT_MONTH);
-  const lmCohort = buildCohort(priorMd, lmKey);
-  const lyCohort = buildCohort(lyMd,    lyKey);
+  const lmCohort = buildCohort(priorMd);
+  const lyCohort = buildCohort(lyMd);
 
   const renderCohortBlock = (cohort, title, accentColor) => {
     const { label, clients } = cohort;
     if (!clients.length) return `
-      <div style="flex:1;min-width:300px">
-        <div style="font-size:12px;font-weight:600;color:${accentColor};margin-bottom:8px;padding:0 4px">${title} · ${label}</div>
-        <div style="padding:16px;color:var(--ink-soft);font-size:12px">No new clients in ${label}.</div>
-      </div>`;
-
-    const total    = clients.length;
-    const retained = clients.filter(c => c.retained).length;
-    const grew     = clients.filter(c => c.grew).length;
-    const churned  = total - retained;
-    const retRate  = Math.round((retained / total) * 100);
-
-    const funnelHtml = `
-      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0 4px">
-        <div style="flex:${grew};background:#10B981"></div>
-        <div style="flex:${retained - grew};background:#3B82F6"></div>
-        <div style="flex:${churned};background:#EF4444;opacity:0.4"></div>
-      </div>
-      <div style="display:flex;gap:10px;font-size:10px;color:var(--ink-soft);margin-bottom:10px">
-        <span>↑ Grew (${grew})</span>
-        <span>→ Flat (${retained - grew})</span>
-        <span>✕ Churned (${churned})</span>
+      <div style="flex:1;min-width:300px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:12px 14px;background:${accentColor}10;border-bottom:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:600;color:${accentColor};text-transform:uppercase;letter-spacing:0.05em">${title}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px">0 new clients vs ${label}</div>
+        </div>
+        <div style="padding:16px;color:var(--ink-soft);font-size:12px">No new clients vs ${label}.</div>
       </div>`;
 
     const rowsHtml = clients.map((c, i) => {
       const buCls = { LCS1:'badge-green', LCS2:'badge-blue', MM1:'badge-amber', MM2:'badge-red' }[c.bu] || 'badge-gray';
-      let statusBadge;
-      if (!c.retained) {
-        statusBadge = `<span style="font-size:10px;font-weight:500;color:var(--red);background:#EF444418;padding:1px 6px;border-radius:8px">✕ Churned</span>`;
-      } else if (c.grew) {
-        statusBadge = `<span style="font-size:10px;font-weight:500;color:var(--green);background:#10B98118;padding:1px 6px;border-radius:8px">↑ Grew</span>`;
-      } else {
-        statusBadge = `<span style="font-size:10px;font-weight:500;color:var(--accent);background:var(--accent-soft);padding:1px 6px;border-radius:8px">→ Flat</span>`;
-      }
-      const growthCell = c.growthPct !== null ? growthBadge(c.growthPct) : '<span style="color:var(--ink-faint)">—</span>';
       return `<tr>
         <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
         <td style="font-weight:500;font-size:12px">${c.name}</td>
         <td><span class="badge ${buCls}" style="font-size:9px">${c.bu}</span></td>
-        <td style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${fmtNum(c.firstRev)} Cr</td>
-        <td style="text-align:right;font-family:var(--mono);font-size:11px">${c.retained ? fmtNum(c.currRev)+' Cr' : '<span style="color:var(--ink-faint)">—</span>'}</td>
-        <td style="text-align:right">${growthCell}</td>
-        <td>${statusBadge}</td>
+        <td style="font-size:12px;color:var(--ink-soft)">${c.category}</td>
+        <td style="font-size:12px;color:var(--ink-soft)">${c.agency}</td>
+        <td style="text-align:right;font-family:var(--mono);font-size:11px;font-weight:500">${fmtNum(c.currRev)} Cr</td>
       </tr>`;
     }).join('');
 
@@ -3318,8 +3287,7 @@ function renderCohort() {
       <div style="flex:1;min-width:300px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
         <div style="padding:12px 14px;background:${accentColor}10;border-bottom:1px solid var(--border)">
           <div style="font-size:11px;font-weight:600;color:${accentColor};text-transform:uppercase;letter-spacing:0.05em">${title}</div>
-          <div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px">${label} · ${total} new clients</div>
-          ${funnelHtml}
+          <div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px">${md.label} · ${clients.length} new clients vs ${label}</div>
         </div>
         <div style="overflow-x:auto">
           <table class="ptable" style="font-size:12px">
@@ -3327,10 +3295,9 @@ function renderCohort() {
               <th style="min-width:24px">#</th>
               <th>Client</th>
               <th>BU</th>
-              <th style="text-align:right;min-width:70px">First Rev</th>
-              <th style="text-align:right;min-width:70px">Now</th>
-              <th style="text-align:right;min-width:60px">Growth</th>
-              <th style="min-width:80px">Status</th>
+              <th>Category</th>
+              <th>Agency</th>
+              <th style="text-align:right;min-width:70px">Rev</th>
             </tr></thead>
             <tbody>${rowsHtml}</tbody>
           </table>
@@ -3340,11 +3307,11 @@ function renderCohort() {
 
   panel.innerHTML = `
     <div style="padding:12px 18px;font-size:12px;color:var(--ink-soft);border-bottom:1px solid var(--border)">
-      Tracking new client retention — who was brand new in <strong style="color:var(--ink)">${lmCohort.label}</strong> and <strong style="color:var(--ink)">${lyCohort.label}</strong>, and are they still active now?
+      New clients in <strong style="color:var(--ink)">${md.label}</strong> — who wasn't active in <strong style="color:var(--ink)">${priorMd?.label || '—'}</strong> or <strong style="color:var(--ink)">${lyMd?.label || '—'}</strong>?
     </div>
     <div style="display:flex;gap:14px;padding:14px;flex-wrap:wrap">
-      ${renderCohortBlock(lmCohort, 'Last Month Cohort', '#3B82F6')}
-      ${renderCohortBlock(lyCohort, 'Last Year Same Month Cohort', '#8B5CF6')}
+      ${renderCohortBlock(lmCohort, 'New vs Last Month', '#3B82F6')}
+      ${renderCohortBlock(lyCohort, 'New vs Last Year Same Month', '#8B5CF6')}
     </div>`;
 }
 
