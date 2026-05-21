@@ -715,6 +715,9 @@ let buChart = null;
 let platformChart = null;
 let bubbleChart = null;
 let diveChart = null;
+let DIVE_FROM = null;
+let DIVE_TO   = null;
+let _diveHistory = [];
 let _diagLMContent = '';
 let _diagLYContent = '';
 let _diagLMStats = '';
@@ -3354,74 +3357,50 @@ function openClientDive(clientName) {
     (currentEntry.agency && currentEntry.agency !== '—' ? `<span style="color:var(--ink-faint)">·</span> <span style="margin-left:6px">${currentEntry.agency}</span>` : '');
 
   // ── Sparkline ─────────────────────────────────────
-  const currentIdx  = history.findIndex(h => h.mkey === CURRENT_MONTH);
-  const pointColors = history.map((h, i) =>
-    i === currentIdx ? '#3B82F6' : h.del_rev > 0 ? 'rgba(59,130,246,0.5)' : 'rgba(203,213,225,0.3)'
-  );
-  const pointSizes  = history.map((h, i) => i === currentIdx ? 5 : h.del_rev > 0 ? 3 : 0);
+  _diveHistory = history;
+  DIVE_FROM = history[0]?.mkey || null;
+  DIVE_TO   = history[history.length - 1]?.mkey || null;
 
-  if (diveChart) diveChart.destroy();
-  const ctx = document.getElementById('dive-chart')?.getContext('2d');
-  if (ctx) {
-    diveChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels:   history.map(h => h.label),
-        datasets: [{
-          data:                history.map(h => h.del_rev),
-          borderColor:         'rgba(59,130,246,0.8)',
-          backgroundColor:     'rgba(59,130,246,0.06)',
-          borderWidth:         2,
-          pointBackgroundColor: pointColors,
-          pointRadius:         pointSizes,
-          tension:             0.3,
-          fill:                true,
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: {
-          callbacks: { label: ctx => fmtNum(ctx.raw) + ' Cr' }
-        }},
-        scales: {
-          x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 45, maxTicksLimit: 10 } },
-          y: { grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, callback: v => v + ' Cr' } }
-        }
-      }
-    });
+  // Inject range picker before the canvas (idempotent — reuses existing div on reopen)
+  const _canvas = document.getElementById('dive-chart');
+  if (_canvas && _canvas.parentElement) {
+    let _picker = _canvas.parentElement.querySelector('.dive-range-picker');
+    if (!_picker) {
+      _picker = document.createElement('div');
+      _picker.className = 'dive-range-picker';
+      _canvas.parentElement.insertBefore(_picker, _canvas);
+    }
+    const _opts = history.map(h => `<option value="${h.mkey}">${h.label}</option>`).join('');
+    _picker.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0 6px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--ink-soft);font-weight:500">Show range:</span>
+        <select id="dive-from-sel" onchange="DIVE_FROM=this.value;_renderDiveChart()"
+          style="font-size:11px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--ink);font-family:inherit;cursor:pointer">${_opts}</select>
+        <span style="font-size:11px;color:var(--ink-soft)">→</span>
+        <select id="dive-to-sel" onchange="DIVE_TO=this.value;_renderDiveChart()"
+          style="font-size:11px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--ink);font-family:inherit;cursor:pointer">${_opts}</select>
+      </div>`;
+    document.getElementById('dive-from-sel').value = DIVE_FROM;
+    document.getElementById('dive-to-sel').value   = DIVE_TO;
   }
 
   // ── Stats row ─────────────────────────────────────
   document.getElementById('dive-stats').innerHTML = [
-    { label: 'This Month',     val: fmtNum(currentEntry.del_rev || 0) + ' Cr', sub: 'Delivered revenue' },
-    { label: 'Peak Month',     val: fmtNum(peakEntry.del_rev || 0) + ' Cr',   sub: peakEntry.label || '—' },
-    { label: 'Avg Monthly',    val: fmtNum(avgRev) + ' Cr',                    sub: activeMonths.length + ' active months' },
-    { label: 'First Appeared', val: firstEntry.label ? (firstEntry.mkey === DATA.available_months[0] ? firstEntry.label + ' <span style="opacity:0.55;font-size:0.82em;font-family:var(--font);font-weight:400">(earlier)</span>' : firstEntry.label) : '—', sub: firstEntry.mkey === DATA.available_months[0] ? "Data starts Apr '24 — client may be older" : 'Earliest month on record' },
+    { label: 'This Month',     val: fmtNum(currentEntry.del_rev || 0) + ' Cr', sub: 'Delivered revenue',      id: ''                 },
+    { label: 'This Period',    val: '—',                                         sub: 'Sum of selected range', id: 'dive-stat-period' },
+    { label: 'Peak Month',     val: fmtNum(peakEntry.del_rev || 0) + ' Cr',   sub: peakEntry.label || '—',   id: ''                 },
+    { label: 'Avg Monthly',    val: fmtNum(avgRev) + ' Cr',                    sub: activeMonths.length + ' active months', id: '' },
+    { label: 'First Appeared', val: firstEntry.label ? (firstEntry.mkey === DATA.available_months[0] ? firstEntry.label + ' <span style="opacity:0.55;font-size:0.82em;font-family:var(--font);font-weight:400">(earlier)</span>' : firstEntry.label) : '—', sub: firstEntry.mkey === DATA.available_months[0] ? "Data starts Apr '24 — client may be older" : 'Earliest month on record', id: '' },
   ].map(s => `
-    <div class="dive-stat">
+    <div class="dive-stat"${s.id ? ` id="${s.id}"` : ''}>
       <div class="dive-stat-label">${s.label}</div>
       <div class="dive-stat-val">${s.val}</div>
       <div class="dive-stat-sub">${s.sub}</div>
     </div>`
   ).join('');
 
-  // ── Revenue mix bars ──────────────────────────────
-  const totalPlatRev = (currentEntry.ctv_rev || 0) + (currentEntry.mobile_rev || 0);
-  const totalAdRev   = (currentEntry.video_rev || 0) + (currentEntry.display_rev || 0);
-  const mixItems = [
-    { label: 'CTV',     val: currentEntry.ctv_rev    || 0, total: totalPlatRev || 1, color: '#10B981' },
-    { label: 'Mobile',  val: currentEntry.mobile_rev || 0, total: totalPlatRev || 1, color: '#3B82F6' },
-    { label: 'Video',   val: currentEntry.video_rev  || 0, total: totalAdRev   || 1, color: '#8B5CF6' },
-    { label: 'Display', val: currentEntry.display_rev|| 0, total: totalAdRev   || 1, color: '#F59E0B' },
-  ];
-  document.getElementById('dive-mix').innerHTML = mixItems.map(m => {
-    const pct = m.total > 0 ? Math.round((m.val / m.total) * 100) : 0;
-    return `<div class="mix-row">
-      <div class="mix-label">${m.label}</div>
-      <div class="mix-bar-bg"><div class="mix-bar-fill" style="width:${pct}%;background:${m.color}"></div></div>
-      <div class="mix-val">${fmtNum(m.val)} Cr</div>
-    </div>`;
-  }).join('');
+  // ── Revenue mix bars + period stat — handled by _renderDiveChart ──────
+  _renderDiveChart();
 
   // ── Gemini talk points ────────────────────────────
   const geminiSection = document.getElementById('dive-gemini-section');
@@ -3478,6 +3457,84 @@ Return ONLY 3 talk points as plain text, one per line, starting with a bullet �
   drawer.style.display  = 'flex';
   drawer.classList.add('open');
   document.body.style.overflow = 'hidden';
+}
+
+function _renderDiveChart() {
+  const from = DIVE_FROM || _diveHistory[0]?.mkey;
+  const to   = DIVE_TO   || _diveHistory[_diveHistory.length - 1]?.mkey;
+  const filtered = _diveHistory.filter(h => h.mkey >= from && h.mkey <= to);
+  if (!filtered.length) return;
+
+  const currentIdx  = filtered.findIndex(h => h.mkey === CURRENT_MONTH);
+  const pointColors = filtered.map((h, i) =>
+    i === currentIdx ? '#3B82F6' : h.del_rev > 0 ? 'rgba(59,130,246,0.5)' : 'rgba(203,213,225,0.3)'
+  );
+  const pointSizes  = filtered.map((h, i) => i === currentIdx ? 5 : h.del_rev > 0 ? 3 : 0);
+
+  if (diveChart) diveChart.destroy();
+  const ctx = document.getElementById('dive-chart')?.getContext('2d');
+  if (!ctx) return;
+  diveChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels:   filtered.map(h => h.label),
+      datasets: [{
+        data:                filtered.map(h => h.del_rev),
+        borderColor:         'rgba(59,130,246,0.8)',
+        backgroundColor:     'rgba(59,130,246,0.06)',
+        borderWidth:         2,
+        pointBackgroundColor: pointColors,
+        pointRadius:         pointSizes,
+        tension:             0.3,
+        fill:                true,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: { label: c => fmtNum(c.raw) + ' Cr' }
+      }},
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 45, maxTicksLimit: 10 } },
+        y: { grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, callback: v => v + ' Cr' } }
+      }
+    }
+  });
+
+  // ── Update "This Period" stat card ────────────────────
+  const periodRev = r2(filtered.reduce((t, h) => t + h.del_rev, 0));
+  const periodEl  = document.getElementById('dive-stat-period');
+  if (periodEl) {
+    periodEl.querySelector('.dive-stat-val').textContent = fmtNum(periodRev) + ' Cr';
+    const fromLbl = filtered[0]?.label || '';
+    const toLbl   = filtered[filtered.length - 1]?.label || '';
+    periodEl.querySelector('.dive-stat-sub').textContent =
+      filtered.length === 1 ? fromLbl : fromLbl + ' → ' + toLbl;
+  }
+
+  // ── Update revenue mix bars for selected period ────────
+  const mixEl = document.getElementById('dive-mix');
+  if (mixEl) {
+    const pCTV     = r2(filtered.reduce((t, h) => t + (h.ctv_rev     || 0), 0));
+    const pMobile  = r2(filtered.reduce((t, h) => t + (h.mobile_rev  || 0), 0));
+    const pVideo   = r2(filtered.reduce((t, h) => t + (h.video_rev   || 0), 0));
+    const pDisplay = r2(filtered.reduce((t, h) => t + (h.display_rev || 0), 0));
+    const platTotal = (pCTV + pMobile)   || 1;
+    const adTotal   = (pVideo + pDisplay) || 1;
+    mixEl.innerHTML = [
+      { label: 'CTV',     val: pCTV,     total: platTotal, color: '#10B981' },
+      { label: 'Mobile',  val: pMobile,  total: platTotal, color: '#3B82F6' },
+      { label: 'Video',   val: pVideo,   total: adTotal,   color: '#8B5CF6' },
+      { label: 'Display', val: pDisplay, total: adTotal,   color: '#F59E0B' },
+    ].map(m => {
+      const pct = Math.round((m.val / m.total) * 100);
+      return `<div class="mix-row">
+        <div class="mix-label">${m.label}</div>
+        <div class="mix-bar-bg"><div class="mix-bar-fill" style="width:${pct}%;background:${m.color}"></div></div>
+        <div class="mix-val">${fmtNum(m.val)} Cr</div>
+      </div>`;
+    }).join('');
+  }
 }
 
 function closeClientDive() {
