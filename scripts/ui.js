@@ -3231,7 +3231,7 @@ function renderCohort() {
     if (!refMd) return { label: '—', clients: [] };
     const refNames = new Set((refMd.top_clients || []).map(c => c.name));
     const newClients = (md.top_clients || [])
-      .filter(c => !refNames.has(c.name) && (c.del_rev || 0) > 0)
+      .filter(c => !refNames.has(c.name) && (c.del_rev || 0) >= 0.1)
       .map(c => ({
         name:     c.name,
         bu:       c.bu       || '—',
