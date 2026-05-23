@@ -1450,7 +1450,7 @@ function computeEcpm(md) {
   if (CURRENT_ADTYPE === 'Display') return null;
   if (CURRENT_FORMAT !== 'all' && !['Preroll','Midroll'].includes(CURRENT_FORMAT)) return null;
 
-  const needsClientPool = CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all';
+  const needsClientPool = CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
 
   if (!needsClientPool) {
     // Fast path — use pre-aggregated ecpm_data rows
@@ -1471,11 +1471,13 @@ function computeEcpm(md) {
     return totalImp > 0 ? r2((totalRevCr * 10000000 / totalImp) * 1000) : null;
   }
 
-  // Category/Agency filter active — aggregate from top_clients
+  // Category/Agency/Client filter active — aggregate from top_clients
   let clients = (md.top_clients || []).slice();
   clients = filterClientsByBU(clients, CURRENT_BU);
   if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
   if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
+  if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
+  if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
   clients = clients.filter(c => c.bu !== 'Mediation');
 
   const getImpAndRev = (c) => {
@@ -1671,6 +1673,7 @@ clients: _buClients.length,
     clients = filterClientsByBU(clients, buName);
     if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
     if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
+  if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
     if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
     const hasBooked = clients.some(c => c.booked_rev != null);
 return {
@@ -1865,6 +1868,7 @@ function renderPlatform(md) {
     clients = filterClientsByBU(clients, CURRENT_BU);
     if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
     if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
+  if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
     if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
 
     const platKey = platformName === 'CTV' ? 'ctv_rev' : platformName === 'Mobile' ? 'mobile_rev' : 'mobilectv_rev';
