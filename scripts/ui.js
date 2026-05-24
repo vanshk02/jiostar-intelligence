@@ -388,9 +388,9 @@ function renderFlags(md) {
     if (!monthData) return [];
     let cs = (monthData.top_clients || []).slice();
     cs = filterClientsByBU(cs, CURRENT_BU);
-    if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c => c.category === CURRENT_CATEGORY);
-    if (CURRENT_AGENCY   !== 'all') cs = cs.filter(c => c.agency   === CURRENT_AGENCY);
-    if (CURRENT_CLIENT   !== 'all') cs = cs.filter(c => c.name     === CURRENT_CLIENT);
+    if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+    if (CURRENT_AGENCY   !== 'all') cs = cs.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+    if (CURRENT_CLIENT   !== 'all') cs = cs.filter(c => c.name === CURRENT_CLIENT);
     return cs;
   };
 
@@ -510,6 +510,13 @@ function openDiagDrilldown(type, name, pct, showLY = false) {
       if (name === 'Mobile')     return c.mobile_rev    ?? 0;
       if (name === 'Mobile+CTV') return c.mobilectv_rev ?? 0;
     }
+    const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+    if (f !== 'all') { const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null; if (!base) return 0; if (p === 'CTV') return c[`ctv_${base}_rev`]??0; if (p === 'Mobile') return c[`mob_${base}_rev`]??0; if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`]??0; return c[fk]??0; }
+    if (a === 'Video')   { if (p === 'CTV') return c.ctv_video_rev??0;   if (p === 'Mobile') return c.mob_video_rev??0;   if (p === 'Mobile+CTV') return c.mobilectv_video_rev??0;   return c.video_rev??0; }
+    if (a === 'Display') { if (p === 'CTV') return c.ctv_display_rev??0; if (p === 'Mobile') return c.mob_display_rev??0; if (p === 'Mobile+CTV') return c.mobilectv_display_rev??0; return c.display_rev??0; }
+    if (p === 'CTV')        return c.ctv_rev        ?? 0;
+    if (p === 'Mobile')     return c.mobile_rev     ?? 0;
+    if (p === 'Mobile+CTV') return c.mobilectv_rev  ?? 0;
     return c.del_rev ?? 0;
   };
 
@@ -520,8 +527,8 @@ function openDiagDrilldown(type, name, pct, showLY = false) {
       return clients.filter(c => c.bu === name);
     }
     if (type === 'Platform') return clients; // all clients — we use entity-specific rev field
-    if (type === 'Category') return clients.filter(c => c.category === name);
-    if (type === 'Agency')   return clients.filter(c => c.agency   === name);
+    if (type === 'Category') return clients.filter(c => c.category === name || (c.category_rev_map && c.category_rev_map[name] > 0));
+    if (type === 'Agency')   return clients.filter(c => c.agency   === name || (c.agency_rev_map   && c.agency_rev_map[name]   > 0));
     return clients;
   };
 
@@ -1140,23 +1147,26 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     adjMobile = r2(pureMobile + mobCTV * mobRatio);
   } else {
     const _gCTV = (c) => {
+      if (CURRENT_PLATFORM === 'Mobile' || CURRENT_PLATFORM === 'Mobile+CTV') return 0;
       const _f = CURRENT_FORMAT, _a = CURRENT_ADTYPE;
       if (_f !== 'all') { const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null; return base ? (c[`ctv_${base}_rev`] ?? 0) : 0; }
-      if (_a === 'Video')   return c.ctv_video_rev   ?? 0;
+      if (_a === 'Video') return c.ctv_video_rev ?? 0;
       if (_a === 'Display') return c.ctv_display_rev ?? 0;
       return c.ctv_rev ?? 0;
     };
     const _gMob = (c) => {
+      if (CURRENT_PLATFORM === 'CTV' || CURRENT_PLATFORM === 'Mobile+CTV') return 0;
       const _f = CURRENT_FORMAT, _a = CURRENT_ADTYPE;
       if (_f !== 'all') { const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null; return base ? (c[`mob_${base}_rev`] ?? 0) : 0; }
-      if (_a === 'Video')   return c.mob_video_rev   ?? 0;
+      if (_a === 'Video') return c.mob_video_rev ?? 0;
       if (_a === 'Display') return c.mob_display_rev ?? 0;
       return c.mobile_rev ?? 0;
     };
     const _gMCTV = (c) => {
+      if (CURRENT_PLATFORM === 'CTV' || CURRENT_PLATFORM === 'Mobile') return 0;
       const _f = CURRENT_FORMAT, _a = CURRENT_ADTYPE;
       if (_f !== 'all') { const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null; return base ? (c[`mctv_${base}_rev`] ?? 0) : 0; }
-      if (_a === 'Video')   return c.mobilectv_video_rev   ?? 0;
+      if (_a === 'Video') return c.mobilectv_video_rev ?? 0;
       if (_a === 'Display') return c.mobilectv_display_rev ?? 0;
       return c.mobilectv_rev ?? 0;
     };
@@ -1164,8 +1174,11 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     const pureMobile = r2(filteredClients.reduce((t,c) => t + _gMob(c),  0));
     const mobCTV     = r2(filteredClients.reduce((t,c) => t + _gMCTV(c), 0));
     const pureTotal  = pureCTV + pureMobile;
-    const ctvRatio   = pureTotal > 0 ? pureCTV    / pureTotal : 0.5;
-    const mobRatio   = pureTotal > 0 ? pureMobile / pureTotal : 0.5;
+    const stPureCTV  = md.platform['CTV']    ? md.platform['CTV'].del_rev    : 0;
+    const stPureMob  = md.platform['Mobile'] ? md.platform['Mobile'].del_rev : 0;
+    const stTotal    = stPureCTV + stPureMob;
+    const ctvRatio   = pureTotal > 0 ? pureCTV / pureTotal : (stTotal > 0 ? stPureCTV / stTotal : 0.5);
+    const mobRatio   = pureTotal > 0 ? pureMobile / pureTotal : (stTotal > 0 ? stPureMob / stTotal : 0.5);
     adjCTV    = r2(pureCTV    + mobCTV * ctvRatio);
     adjMobile = r2(pureMobile + mobCTV * mobRatio);
   }
@@ -1221,9 +1234,9 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     if (!monthData) return [];
     let cs = (monthData.top_clients || []).slice();
     cs = filterClientsByBU(cs, CURRENT_BU);
-    if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c => c.category === CURRENT_CATEGORY);
-    if (CURRENT_AGENCY   !== 'all') cs = cs.filter(c => c.agency   === CURRENT_AGENCY);
-    if (CURRENT_CLIENT   !== 'all') cs = cs.filter(c => c.name     === CURRENT_CLIENT);
+    if (CURRENT_CATEGORY !== 'all') cs = cs.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+    if (CURRENT_AGENCY   !== 'all') cs = cs.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+    if (CURRENT_CLIENT   !== 'all') cs = cs.filter(c => c.name === CURRENT_CLIENT);
     return cs;
   };
 
@@ -1334,13 +1347,18 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       const tot = pC + pM; const cR = tot > 0 ? pC/tot : 0.5; const mR = tot > 0 ? pM/tot : 0.5;
       return { ctv: r2(pC + pMC*cR), mobile: r2(pM + pMC*mR) };
     }
-    const _pCTV  = (c) => { const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`ctv_${base}_rev`]??0):0;} if(_a==='Video')return c.ctv_video_rev??0;if(_a==='Display')return c.ctv_display_rev??0;return c.ctv_rev??0; };
-    const _pMob  = (c) => { const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`mob_${base}_rev`]??0):0;} if(_a==='Video')return c.mob_video_rev??0;if(_a==='Display')return c.mob_display_rev??0;return c.mobile_rev??0; };
-    const _pMCTV = (c) => { const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`mctv_${base}_rev`]??0):0;} if(_a==='Video')return c.mobilectv_video_rev??0;if(_a==='Display')return c.mobilectv_display_rev??0;return c.mobilectv_rev??0; };
+    const _pCTV  = (c) => { if (CURRENT_PLATFORM === 'Mobile' || CURRENT_PLATFORM === 'Mobile+CTV') return 0; const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`ctv_${base}_rev`]??0):0;} if(_a==='Video')return c.ctv_video_rev??0;if(_a==='Display')return c.ctv_display_rev??0;return c.ctv_rev??0; };
+    const _pMob  = (c) => { if (CURRENT_PLATFORM === 'CTV' || CURRENT_PLATFORM === 'Mobile+CTV') return 0; const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`mob_${base}_rev`]??0):0;} if(_a==='Video')return c.mob_video_rev??0;if(_a==='Display')return c.mob_display_rev??0;return c.mobile_rev??0; };
+    const _pMCTV = (c) => { if (CURRENT_PLATFORM === 'CTV' || CURRENT_PLATFORM === 'Mobile') return 0; const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`mctv_${base}_rev`]??0):0;} if(_a==='Video')return c.mobilectv_video_rev??0;if(_a==='Display')return c.mobilectv_display_rev??0;return c.mobilectv_rev??0; };
     const pC  = r2(pool.reduce((t,c) => t + _pCTV(c),  0));
     const pM  = r2(pool.reduce((t,c) => t + _pMob(c),  0));
     const pMC = r2(pool.reduce((t,c) => t + _pMCTV(c), 0));
-    const tot = pC + pM; const cR = tot > 0 ? pC/tot : 0.5; const mR = tot > 0 ? pM/tot : 0.5;
+    const tot = pC + pM;
+    const stC = monthData.platform['CTV']    ? monthData.platform['CTV'].del_rev    : 0;
+    const stM = monthData.platform['Mobile'] ? monthData.platform['Mobile'].del_rev : 0;
+    const stT = stC + stM;
+    const cR = tot > 0 ? pC/tot : (stT > 0 ? stC/stT : 0.5);
+    const mR = tot > 0 ? pM/tot : (stT > 0 ? stM/stT : 0.5);
     return { ctv: r2(pC + pMC*cR), mobile: r2(pM + pMC*mR) };
   };
   const priorPlat = getPlatRev(priorPool, priorMd);
@@ -1671,10 +1689,9 @@ clients: _buClients.length,
     // Category/Agency/Client filter active — aggregate from top_clients
     let clients = (monthData.top_clients || []).slice();
     clients = filterClientsByBU(clients, buName);
-    if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
-    if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
-  if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
-    if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
+    if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+    if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+    if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
     const hasBooked = clients.some(c => c.booked_rev != null);
 return {
   rev:     r2(clients.reduce((t, c) => t + clientRev(c), 0)),
@@ -1866,10 +1883,9 @@ function renderPlatform(md) {
 
     let clients = (monthData.top_clients || []).slice();
     clients = filterClientsByBU(clients, CURRENT_BU);
-    if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY);
-    if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY);
-  if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
-    if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name     === CURRENT_CLIENT);
+    if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+    if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+    if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
 
     const platKey = platformName === 'CTV' ? 'ctv_rev' : platformName === 'Mobile' ? 'mobile_rev' : 'mobilectv_rev';
     const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
@@ -2385,6 +2401,9 @@ clients: clientCount,
 
   const totalUniqueClients = (() => {
     const fc = getFilteredClients(md);
+    const _a = CURRENT_ADTYPE;
+    if (_a === 'Video')   return fc.filter(c => clientRev(c, true)  > 0).length;
+    if (_a === 'Display') return fc.filter(c => clientRev(c, false) > 0).length;
     return fc.filter(c => clientRev(c, true) > 0 || clientRev(c, false) > 0).length;
   })();
 
@@ -3120,16 +3139,29 @@ function renderChurners() {
 
   const currentNames = new Set((md.top_clients || []).map(c => c.name));
 
+  const _churnRevForFilters = (c) => {
+    const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+    if (f !== 'all') { const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null; if (!base) return 0; if (p === 'CTV') return c[`ctv_${base}_rev`]??0; if (p === 'Mobile') return c[`mob_${base}_rev`]??0; if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`]??0; return c[fk]??0; }
+    if (a === 'Video')   { if (p === 'CTV') return c.ctv_video_rev??0;   if (p === 'Mobile') return c.mob_video_rev??0;   if (p === 'Mobile+CTV') return c.mobilectv_video_rev??0;   return c.video_rev??0; }
+    if (a === 'Display') { if (p === 'CTV') return c.ctv_display_rev??0; if (p === 'Mobile') return c.mob_display_rev??0; if (p === 'Mobile+CTV') return c.mobilectv_display_rev??0; return c.display_rev??0; }
+    if (p === 'CTV') return c.ctv_rev??0; if (p === 'Mobile') return c.mobile_rev??0; if (p === 'Mobile+CTV') return c.mobilectv_rev??0;
+    return c.del_rev??0;
+  };
+  // Current month's filter-aware active client set
+  const currFilteredRevMap = {};
+  (md.top_clients || []).forEach(c => { const rv = _churnRevForFilters(c); if (rv > 0) currFilteredRevMap[c.name] = rv; });
+
   const buildChurners = (refMd) => {
     if (!refMd) return [];
     return (refMd.top_clients || [])
-      .filter(c => (c.del_rev || 0) >= 0.1)
-      .filter(c => !currentNames.has(c.name))
+      .filter(c => _churnRevForFilters(c) >= 0.1)
+      .filter(c => !currFilteredRevMap[c.name])
       .filter(c => {
         if (CURRENT_BU !== 'all' && CURRENT_BU !== 'Others' && c.bu !== CURRENT_BU) return false;
         if (CURRENT_BU === 'Others' && MAIN_BUS.includes(c.bu)) return false;
         if (CURRENT_CATEGORY !== 'all' && c.category !== CURRENT_CATEGORY) return false;
         if (CURRENT_AGENCY   !== 'all' && c.agency   !== CURRENT_AGENCY)   return false;
+        if (CURRENT_CLIENT   !== 'all' && c.name     !== CURRENT_CLIENT)   return false;
         return true;
       })
       .map(c => {
@@ -3137,16 +3169,14 @@ function renderChurners() {
         const mobRev  = c.mobile_rev    || 0;
         const mctvRev = c.mobilectv_rev || 0;
         const platPeak = Math.max(ctvRev, mobRev, mctvRev);
-        const platLabel = platPeak === 0 ? '—'
-          : platPeak === ctvRev  ? 'CTV'
-          : platPeak === mobRev  ? 'Mobile'
-          : 'Mobile+CTV';
+        const platLabel = CURRENT_PLATFORM !== 'all' ? CURRENT_PLATFORM
+          : platPeak === 0 ? '—' : platPeak === ctvRev ? 'CTV' : platPeak === mobRev ? 'Mobile' : 'Mobile+CTV';
         return {
           name:     c.name,
           bu:       c.bu       || '—',
           category: c.category || '—',
           agency:   c.agency   || '—',
-          lastRev:  c.del_rev  || 0,
+          lastRev:  r2(_churnRevForFilters(c)),
           lastPlat: platLabel,
         };
       })
@@ -3231,17 +3261,36 @@ function renderCohort() {
   }
 
   // New clients = active in current month but NOT in ref month
+  const _cohortRevForFilters = (c) => {
+    const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+    if (f !== 'all') { const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null; if (!base) return 0; if (p === 'CTV') return c[`ctv_${base}_rev`]??0; if (p === 'Mobile') return c[`mob_${base}_rev`]??0; if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`]??0; return c[fk]??0; }
+    if (a === 'Video')   { if (p === 'CTV') return c.ctv_video_rev??0;   if (p === 'Mobile') return c.mob_video_rev??0;   if (p === 'Mobile+CTV') return c.mobilectv_video_rev??0;   return c.video_rev??0; }
+    if (a === 'Display') { if (p === 'CTV') return c.ctv_display_rev??0; if (p === 'Mobile') return c.mob_display_rev??0; if (p === 'Mobile+CTV') return c.mobilectv_display_rev??0; return c.display_rev??0; }
+    if (p === 'CTV') return c.ctv_rev??0; if (p === 'Mobile') return c.mobile_rev??0; if (p === 'Mobile+CTV') return c.mobilectv_rev??0;
+    return c.del_rev??0;
+  };
+
   const buildCohort = (refMd) => {
     if (!refMd) return { label: '—', clients: [] };
-    const refNames = new Set((refMd.top_clients || []).map(c => c.name));
-    const newClients = (md.top_clients || [])
-      .filter(c => !refNames.has(c.name) && (c.del_rev || 0) >= 0.1)
+    // Reference month's filtered revenue map — a client "existed" only if they had revenue in this filter context
+    const refFilteredRevMap = {};
+    (refMd.top_clients || []).forEach(c => { const rv = _cohortRevForFilters(c); if (rv > 0) refFilteredRevMap[c.name] = rv; });
+
+    // Apply all active filters to current month pool
+    let pool = (md.top_clients || []).slice();
+    pool = filterClientsByBU(pool, CURRENT_BU);
+    if (CURRENT_CATEGORY !== 'all') pool = pool.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+    if (CURRENT_AGENCY   !== 'all') pool = pool.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+    if (CURRENT_CLIENT   !== 'all') pool = pool.filter(c => c.name === CURRENT_CLIENT);
+
+    const newClients = pool
+      .filter(c => !refFilteredRevMap[c.name] && _cohortRevForFilters(c) >= 0.1)
       .map(c => ({
         name:     c.name,
         bu:       c.bu       || '—',
         category: c.category || '—',
         agency:   c.agency   || '—',
-        currRev:  r2(c.del_rev || 0),
+        currRev:  r2(_cohortRevForFilters(c)),
       }))
       .sort((a, b) => b.currRev - a.currRev);
     return { label: refMd.label, clients: newClients };
