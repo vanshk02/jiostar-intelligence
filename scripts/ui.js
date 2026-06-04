@@ -83,17 +83,34 @@ function getPeriodLabel(keys) {
 
 const AGG_SUM_FIELDS = [
   'del_rev','booked_rev','ctv_rev','mobile_rev','mobilectv_rev','video_rev','display_rev',
-  'ctv_video_rev','ctv_display_rev','mobile_video_rev','mobile_display_rev',
+  'ctv_video_rev','ctv_display_rev','mobile_video_rev','mob_video_rev','mob_display_rev','mobile_display_rev',
   'mobilectv_video_rev','mobilectv_display_rev',
+  // format rev (no platform)
   'preroll_rev','midroll_rev','integ_rev','spots_rev',
   'billboard_rev','breakout_rev','pause_rev','frames_rev','fence_rev','untagged_rev',
-  'ctv_preroll_rev','ctv_midroll_rev','mob_preroll_rev','mob_midroll_rev',
-  'mctv_preroll_rev','mctv_midroll_rev',
+  // CTV × format
+  'ctv_preroll_rev','ctv_midroll_rev','ctv_integ_rev','ctv_spots_rev',
+  'ctv_billboard_rev','ctv_breakout_rev','ctv_pause_rev','ctv_frames_rev','ctv_fence_rev','ctv_untagged_rev',
+  // Mobile × format
+  'mob_preroll_rev','mob_midroll_rev','mob_integ_rev','mob_spots_rev',
+  'mob_billboard_rev','mob_breakout_rev','mob_pause_rev','mob_frames_rev','mob_fence_rev','mob_untagged_rev',
+  // Mobile+CTV × format
+  'mctv_preroll_rev','mctv_midroll_rev','mctv_integ_rev','mctv_spots_rev',
+  'mctv_billboard_rev','mctv_breakout_rev','mctv_pause_rev','mctv_frames_rev','mctv_fence_rev','mctv_untagged_rev',
+  // booked
   'ctv_booked','mobile_booked','mobilectv_booked','video_booked','display_booked',
   'ctv_video_booked','ctv_display_booked','mobile_video_booked','mobile_display_booked',
   'mobilectv_video_booked','mobilectv_display_booked',
+  'ctv_preroll_booked','ctv_midroll_booked','ctv_integ_booked','ctv_spots_booked',
+  'ctv_billboard_booked','ctv_breakout_booked','ctv_pause_booked','ctv_frames_booked','ctv_fence_booked','ctv_untagged_booked',
+  'mob_preroll_booked','mob_midroll_booked','mob_integ_booked','mob_spots_booked',
+  'mob_billboard_booked','mob_breakout_booked','mob_pause_booked','mob_frames_booked','mob_fence_booked','mob_untagged_booked',
+  'mctv_preroll_booked','mctv_midroll_booked','mctv_integ_booked','mctv_spots_booked',
+  'mctv_billboard_booked','mctv_breakout_booked','mctv_pause_booked','mctv_frames_booked','mctv_fence_booked','mctv_untagged_booked',
+  // impressions
   'preroll_imp','midroll_imp','ctv_preroll_imp','ctv_midroll_imp',
   'mob_preroll_imp','mob_midroll_imp','mctv_preroll_imp','mctv_midroll_imp',
+  // client counts
   'clients','ctv_clients','mobile_clients','mobilectv_clients','video_clients','display_clients',
 ];
 
@@ -127,26 +144,41 @@ function aggregateMonths(monthKeys) {
   });
 
   const catMap = {};
+  const catClientSets = {};
   months.forEach(m => {
     (m.categories||[]).forEach(cat => {
-      if (!catMap[cat.name]) catMap[cat.name] = {name:cat.name, del_rev:0, video_rev:0, display_rev:0, booked_rev:null, clients:0};
+      if (!catMap[cat.name]) { catMap[cat.name] = {name:cat.name, del_rev:0, video_rev:0, display_rev:0, booked_rev:null, clients:0}; catClientSets[cat.name] = new Set(); }
       const e = catMap[cat.name];
       e.del_rev += cat.del_rev||0; e.video_rev += cat.video_rev||0; e.display_rev += cat.display_rev||0;
       if (cat.booked_rev != null) { e.booked_rev = (e.booked_rev||0) + cat.booked_rev; }
-      e.clients = Math.max(e.clients, cat.clients||0);
     });
   });
+  // Derive client counts from the aggregated top_clients pool
+  months.forEach(m => {
+    (m.top_clients||[]).forEach(c => {
+      if (!c.del_rev || !c.category) return;
+      if (catClientSets[c.category]) catClientSets[c.category].add(c.name);
+    });
+  });
+  Object.keys(catMap).forEach(name => { catMap[name].clients = catClientSets[name]?.size || 0; });
 
   const agMap = {};
+  const agClientSets = {};
   months.forEach(m => {
     (m.agencies||[]).forEach(ag => {
-      if (!agMap[ag.name]) agMap[ag.name] = {name:ag.name, del_rev:0, video_rev:0, display_rev:0, booked_rev:null, clients:0};
+      if (!agMap[ag.name]) { agMap[ag.name] = {name:ag.name, del_rev:0, video_rev:0, display_rev:0, booked_rev:null, clients:0}; agClientSets[ag.name] = new Set(); }
       const e = agMap[ag.name];
       e.del_rev += ag.del_rev||0; e.video_rev += ag.video_rev||0; e.display_rev += ag.display_rev||0;
       if (ag.booked_rev != null) { e.booked_rev = (e.booked_rev||0) + ag.booked_rev; }
-      e.clients = Math.max(e.clients, ag.clients||0);
     });
   });
+  months.forEach(m => {
+    (m.top_clients||[]).forEach(c => {
+      if (!c.del_rev || !c.agency) return;
+      if (agClientSets[c.agency]) agClientSets[c.agency].add(c.name);
+    });
+  });
+  Object.keys(agMap).forEach(name => { agMap[name].clients = agClientSets[name]?.size || 0; });
 
   const adTypeAgg = {};
   ['Video','Display'].forEach(at => {
@@ -170,8 +202,14 @@ function aggregateMonths(monthKeys) {
           else { cd[f] = (cd[f]||0) + c[f]; }
         }
       });
-      if (c.category_rev_map) cd.category_rev_map = c.category_rev_map;
-      if (c.agency_rev_map)   cd.agency_rev_map   = c.agency_rev_map;
+      if (c.category_rev_map) {
+        if (!cd.category_rev_map) cd.category_rev_map = {};
+        Object.entries(c.category_rev_map).forEach(([k,v]) => { cd.category_rev_map[k] = (cd.category_rev_map[k]||0) + v; });
+      }
+      if (c.agency_rev_map) {
+        if (!cd.agency_rev_map) cd.agency_rev_map = {};
+        Object.entries(c.agency_rev_map).forEach(([k,v]) => { cd.agency_rev_map[k] = (cd.agency_rev_map[k]||0) + v; });
+      }
       if (c.brands)           cd.brands           = c.brands;
     });
   });
@@ -359,7 +397,7 @@ function attachListeners() {
 }
 // ── Flags / Diagnostic Layer ───────────────────────
 function renderFlags(md) {
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
   const flags = [];
 
   const classify = (pct, label, type) => {
@@ -1059,7 +1097,32 @@ function renderHeader(md) {
   document.getElementById('page-title').textContent = md.label;
   document.getElementById('page-sub').textContent = 'Revenue Intelligence · JioStar';
   const colOf = p => p > 0 ? 'var(--green)' : p < 0 ? 'var(--red)' : 'var(--ink-soft)';
-  let metaHtml = `<span>${fmtInt(md.total_clients)} active clients</span>`;
+
+  const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_PLATFORM !== 'all' ||
+    CURRENT_ADTYPE !== 'all' || CURRENT_FORMAT !== 'all' ||
+    CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
+
+  let headerClientCount;
+  if (!anyFilterActive) {
+    headerClientCount = md.total_clients;
+  } else {
+    const clientRevForHeader = (c) => {
+      const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+      if (f !== 'all') { const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null; if (!base) return 0; if (p === 'CTV') return c[`ctv_${base}_rev`]??0; if (p === 'Mobile') return c[`mob_${base}_rev`]??0; if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`]??0; return c[fk]??0; }
+      if (a === 'Video')   { if (p === 'CTV') return c.ctv_video_rev??0; if (p === 'Mobile') return c.mob_video_rev??0; if (p === 'Mobile+CTV') return c.mobilectv_video_rev??0; return c.video_rev??0; }
+      if (a === 'Display') { if (p === 'CTV') return c.ctv_display_rev??0; if (p === 'Mobile') return c.mob_display_rev??0; if (p === 'Mobile+CTV') return c.mobilectv_display_rev??0; return c.display_rev??0; }
+      if (p === 'CTV') return c.ctv_rev??0; if (p === 'Mobile') return c.mobile_rev??0; if (p === 'Mobile+CTV') return c.mobilectv_rev??0;
+      return c.del_rev??0;
+    };
+    let pool = (md.top_clients||[]).slice();
+    pool = filterClientsByBU(pool, CURRENT_BU);
+    if (CURRENT_CATEGORY !== 'all') pool = pool.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+    if (CURRENT_AGENCY   !== 'all') pool = pool.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+    if (CURRENT_CLIENT   !== 'all') pool = pool.filter(c => c.name === CURRENT_CLIENT);
+    headerClientCount = pool.filter(c => clientRevForHeader(c) > 0).length;
+  }
+
+  let metaHtml = `<span>${fmtInt(headerClientCount)} active clients</span>`;
   if (md.vs_prior_month && md.vs_prior_month.change_pct !== null) {
     const p = md.vs_prior_month.change_pct;
     metaHtml += ` <span style="color:var(--ink-faint)">·</span> <span style="color:${colOf(p)};white-space:nowrap">Del Rev ${p>=0?'+':''}${p}% vs ${md.vs_prior_month.label}</span>`;
@@ -1079,7 +1142,7 @@ function renderKPIs(md) {
   const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_PLATFORM !== 'all' ||
     CURRENT_ADTYPE !== 'all' || CURRENT_FORMAT !== 'all' ||
     CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
 
   // ── Get filtered clients pool ──────────────────────────────
   let filteredClients = (md.top_clients || []).slice();
@@ -1093,9 +1156,14 @@ function renderKPIs(md) {
   // ── Client rev for platform/adtype/format filters ──────────
   const clientRevForFilters = (c) => {
     const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+    const _vBs = ['preroll','midroll','integ','spots'];
+    const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
     if (f !== 'all') {
       const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
       if (!base) return 0;
+      // Cross-type mismatch: adtype=Display but video format selected (or vice versa) → 0
+      if (a === 'Display' && _vBs.includes(base)) return 0;
+      if (a === 'Video'   && _dBs.includes(base)) return 0;
       if (p === 'CTV')        return c[`ctv_${base}_rev`]  ?? 0;
       if (p === 'Mobile')     return c[`mob_${base}_rev`]  ?? 0;
       if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`] ?? 0;
@@ -1126,12 +1194,22 @@ function renderKPIs(md) {
     totalClients = md.total_clients;
     totalBooked  = ['LCS1','LCS2','MM1','MM2'].reduce((t,b) => t + (md.bu[b] && md.bu[b].booked_rev != null ? md.bu[b].booked_rev : 0), 0);
   } else {
-    totalRev     = r2(filteredClients.reduce((t,c) => t + clientRevForFilters(c), 0));
-    totalClients = filteredClients.filter(c => clientRevForFilters(c) > 0).length;
+    const agScale = (c) => {
+      if (CURRENT_AGENCY === 'all') return 1;
+      if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+      return c.agency === CURRENT_AGENCY ? 1 : 0;
+    };
+    const catScale = (c) => {
+      if (CURRENT_CATEGORY === 'all') return 1;
+      if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+      return c.category === CURRENT_CATEGORY ? 1 : 0;
+    };
+    totalRev     = r2(filteredClients.reduce((t,c) => t + clientRevForFilters(c) * agScale(c) * catScale(c), 0));
+    totalClients = filteredClients.filter(c => clientRevForFilters(c) * agScale(c) * catScale(c) > 0).length;
     totalBooked  = r2(filteredClients.reduce((t,c) => {
-const cr = clientRevForFilters(c);
-return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev) : 0);
-}, 0));
+      const cr = clientRevForFilters(c) * agScale(c) * catScale(c);
+      return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev) : 0);
+    }, 0));
   }
 
   // ── CTV / Mobile split ─────────────────────────────────────
@@ -1170,9 +1248,11 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       if (_a === 'Display') return c.mobilectv_display_rev ?? 0;
       return c.mobilectv_rev ?? 0;
     };
-    const pureCTV    = r2(filteredClients.reduce((t,c) => t + _gCTV(c),  0));
-    const pureMobile = r2(filteredClients.reduce((t,c) => t + _gMob(c),  0));
-    const mobCTV     = r2(filteredClients.reduce((t,c) => t + _gMCTV(c), 0));
+    const _kpiAgScale  = (c) => { if (CURRENT_AGENCY   === 'all') return 1; if (c.agency_rev_map   && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY]     || 0) / c.del_rev; return c.agency    === CURRENT_AGENCY   ? 1 : 0; };
+    const _kpiCatScale = (c) => { if (CURRENT_CATEGORY === 'all') return 1; if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev; return c.category === CURRENT_CATEGORY ? 1 : 0; };
+    const pureCTV    = r2(filteredClients.reduce((t,c) => t + _gCTV(c)  * _kpiAgScale(c) * _kpiCatScale(c), 0));
+    const pureMobile = r2(filteredClients.reduce((t,c) => t + _gMob(c)  * _kpiAgScale(c) * _kpiCatScale(c), 0));
+    const mobCTV     = r2(filteredClients.reduce((t,c) => t + _gMCTV(c) * _kpiAgScale(c) * _kpiCatScale(c), 0));
     const pureTotal  = pureCTV + pureMobile;
     const stPureCTV  = md.platform['CTV']    ? md.platform['CTV'].del_rev    : 0;
     const stPureMob  = md.platform['Mobile'] ? md.platform['Mobile'].del_rev : 0;
@@ -1185,9 +1265,12 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
 
   // ── Video / Display ────────────────────────────────────────
   let videoRev, displayRev;
+  // When adtype filter is set to one type, the other must be 0
+  const _adTypeIsVideo   = CURRENT_ADTYPE === 'Video';
+  const _adTypeIsDisplay = CURRENT_ADTYPE === 'Display';
   if (!anyFilterActive) {
-    videoRev   = md.ad_type && md.ad_type.Video   ? md.ad_type.Video.del_rev   : 0;
-    displayRev = md.ad_type && md.ad_type.Display ? md.ad_type.Display.del_rev : 0;
+    videoRev   = _adTypeIsDisplay ? 0 : (md.ad_type && md.ad_type.Video   ? md.ad_type.Video.del_rev   : 0);
+    displayRev = _adTypeIsVideo   ? 0 : (md.ad_type && md.ad_type.Display ? md.ad_type.Display.del_rev : 0);
   } else {
     const _vBases = ['preroll','midroll','integ','spots'];
     const _dBases = ['billboard','breakout','pause','frames','fence','untagged'];
@@ -1221,8 +1304,10 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
       if (_p === 'Mobile+CTV') return c.mobilectv_display_rev  ?? 0;
       return c.display_rev ?? 0;
     };
-    videoRev   = r2(filteredClients.reduce((t,c) => t + _getVid(c),  0));
-    displayRev = r2(filteredClients.reduce((t,c) => t + _getDisp(c), 0));
+    const _kpiAgScale2  = (c) => { if (CURRENT_AGENCY   === 'all') return 1; if (c.agency_rev_map   && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY]     || 0) / c.del_rev; return c.agency    === CURRENT_AGENCY   ? 1 : 0; };
+    const _kpiCatScale2 = (c) => { if (CURRENT_CATEGORY === 'all') return 1; if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev; return c.category === CURRENT_CATEGORY ? 1 : 0; };
+    videoRev   = _adTypeIsDisplay ? 0 : r2(filteredClients.reduce((t,c) => t + _getVid(c)  * _kpiAgScale2(c) * _kpiCatScale2(c), 0));
+    displayRev = _adTypeIsVideo   ? 0 : r2(filteredClients.reduce((t,c) => t + _getDisp(c) * _kpiAgScale2(c) * _kpiCatScale2(c), 0));
   }
 
   // ── Biggest Mover — fully filter-aware ────────────────────────
@@ -1284,8 +1369,8 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
 
   // ── eCPM Card ──────────────────────────────────────────────
   const ecpmVal   = computeEcpm(md);
-  const priorEcpm = computeEcpm(DATA.months[priorMonthKey(CURRENT_MONTH)] || null);
-  const lyEcpm    = computeEcpm(DATA.months[lyMonthKey(CURRENT_MONTH)]    || null);
+  const priorEcpm = computeEcpm(DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null);
+  const lyEcpm    = computeEcpm(DATA.months[AGG_LY_KEY    || lyMonthKey(CURRENT_MONTH)]    || null);
  
   const ecpmMomPct = (ecpmVal !== null && priorEcpm !== null && priorEcpm > 0)
     ? r2(((ecpmVal - priorEcpm) / priorEcpm) * 100) : null;
@@ -1293,7 +1378,7 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     ? r2(((ecpmVal - lyEcpm)    / lyEcpm)    * 100) : null;
 
   // ── Filter-aware comparison helpers ─────────────────────────────────────────
-  const lyMd  = DATA.months[lyMonthKey(CURRENT_MONTH)] || null;
+  const lyMd  = DATA.months[AGG_LY_KEY || lyMonthKey(CURRENT_MONTH)] || null;
   const lmLbl = priorMd?.label || 'LM';
   const lyLbl = lyMd?.label    || 'LY';
 
@@ -1314,11 +1399,16 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
   const lyPool    = getFilteredPool(lyMd);
 
   // ── Issue 2: Total Del Rev — filter-aware LM + LY comparisons ────────────────
+  const kpiAgScale = (c) => {
+    if (CURRENT_AGENCY === 'all') return 1;
+    if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+    return c.agency === CURRENT_AGENCY ? 1 : 0;
+  };
   const priorRevF = priorMd
-    ? (!anyFilterActive ? priorMd.total_del_rev : r2(priorPool.reduce((t,c) => t + clientRevForFilters(c), 0)))
+    ? (!anyFilterActive ? priorMd.total_del_rev : r2(priorPool.reduce((t,c) => t + clientRevForFilters(c) * kpiAgScale(c), 0)))
     : null;
   const lyRevF = lyMd
-    ? (!anyFilterActive ? lyMd.total_del_rev    : r2(lyPool.reduce((t,c)    => t + clientRevForFilters(c), 0)))
+    ? (!anyFilterActive ? lyMd.total_del_rev    : r2(lyPool.reduce((t,c)    => t + clientRevForFilters(c) * kpiAgScale(c), 0)))
     : null;
   const revMomPct = priorRevF !== null && priorRevF > 0 ? r2(((totalRev - priorRevF) / priorRevF) * 100) : null;
   const revLyPct  = lyRevF    !== null && lyRevF    > 0 ? r2(((totalRev - lyRevF)    / lyRevF)    * 100) : null;
@@ -1327,10 +1417,10 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
 
   // ── Issue 1: Active Clients — filter-aware CLIENT COUNT comparisons ─────────
   const priorClientCount = priorMd
-    ? (!anyFilterActive ? priorMd.total_clients : priorPool.filter(c => clientRevForFilters(c) > 0).length)
+    ? (!anyFilterActive ? priorMd.total_clients : priorPool.filter(c => clientRevForFilters(c) * kpiAgScale(c) > 0).length)
     : null;
   const lyClientCount = lyMd
-    ? (!anyFilterActive ? lyMd.total_clients    : lyPool.filter(c    => clientRevForFilters(c) > 0).length)
+    ? (!anyFilterActive ? lyMd.total_clients    : lyPool.filter(c    => clientRevForFilters(c) * kpiAgScale(c) > 0).length)
     : null;
   const clientMomPct = priorClientCount !== null && priorClientCount > 0 ? r2(((totalClients - priorClientCount) / priorClientCount) * 100) : null;
   const clientLyPct  = lyClientCount    !== null && lyClientCount    > 0 ? r2(((totalClients - lyClientCount)    / lyClientCount)    * 100) : null;
@@ -1350,9 +1440,9 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     const _pCTV  = (c) => { if (CURRENT_PLATFORM === 'Mobile' || CURRENT_PLATFORM === 'Mobile+CTV') return 0; const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`ctv_${base}_rev`]??0):0;} if(_a==='Video')return c.ctv_video_rev??0;if(_a==='Display')return c.ctv_display_rev??0;return c.ctv_rev??0; };
     const _pMob  = (c) => { if (CURRENT_PLATFORM === 'CTV' || CURRENT_PLATFORM === 'Mobile+CTV') return 0; const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`mob_${base}_rev`]??0):0;} if(_a==='Video')return c.mob_video_rev??0;if(_a==='Display')return c.mob_display_rev??0;return c.mobile_rev??0; };
     const _pMCTV = (c) => { if (CURRENT_PLATFORM === 'CTV' || CURRENT_PLATFORM === 'Mobile') return 0; const _f=CURRENT_FORMAT,_a=CURRENT_ADTYPE; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;return base?(c[`mctv_${base}_rev`]??0):0;} if(_a==='Video')return c.mobilectv_video_rev??0;if(_a==='Display')return c.mobilectv_display_rev??0;return c.mobilectv_rev??0; };
-    const pC  = r2(pool.reduce((t,c) => t + _pCTV(c),  0));
-    const pM  = r2(pool.reduce((t,c) => t + _pMob(c),  0));
-    const pMC = r2(pool.reduce((t,c) => t + _pMCTV(c), 0));
+    const pC  = r2(pool.reduce((t,c) => t + _pCTV(c)  * kpiAgScale(c), 0));
+    const pM  = r2(pool.reduce((t,c) => t + _pMob(c)  * kpiAgScale(c), 0));
+    const pMC = r2(pool.reduce((t,c) => t + _pMCTV(c) * kpiAgScale(c), 0));
     const tot = pC + pM;
     const stC = monthData.platform['CTV']    ? monthData.platform['CTV'].del_rev    : 0;
     const stM = monthData.platform['Mobile'] ? monthData.platform['Mobile'].del_rev : 0;
@@ -1384,8 +1474,8 @@ return t + (c.booked_rev != null && c.del_rev > 0 ? c.booked_rev * (cr/c.del_rev
     const _atVid  = (c) => { const _f=CURRENT_FORMAT,_p=CURRENT_PLATFORM; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;if(!base||!_vBs.includes(base))return 0;if(_p==='CTV')return c[`ctv_${base}_rev`]??0;if(_p==='Mobile')return c[`mob_${base}_rev`]??0;if(_p==='Mobile+CTV')return c[`mctv_${base}_rev`]??0;return c[fk]??0;} if(_p==='CTV')return c.ctv_video_rev??0;if(_p==='Mobile')return c.mob_video_rev??0;if(_p==='Mobile+CTV')return c.mobilectv_video_rev??0;return c.video_rev??0; };
     const _atDisp = (c) => { const _f=CURRENT_FORMAT,_p=CURRENT_PLATFORM; if(_f!=='all'){const fk=formatFieldKey(_f);const base=fk?fk.replace('_rev',''):null;if(!base||!_dBs.includes(base))return 0;if(_p==='CTV')return c[`ctv_${base}_rev`]??0;if(_p==='Mobile')return c[`mob_${base}_rev`]??0;if(_p==='Mobile+CTV')return c[`mctv_${base}_rev`]??0;return c[fk]??0;} if(_p==='CTV')return c.ctv_display_rev??0;if(_p==='Mobile')return c.mob_display_rev??0;if(_p==='Mobile+CTV')return c.mobilectv_display_rev??0;return c.display_rev??0; };
     return {
-      video:   r2(pool.reduce((t,c) => t + _atVid(c),  0)),
-      display: r2(pool.reduce((t,c) => t + _atDisp(c), 0))
+      video:   r2(pool.reduce((t,c) => t + _atVid(c)  * kpiAgScale(c), 0)),
+      display: r2(pool.reduce((t,c) => t + _atDisp(c) * kpiAgScale(c), 0))
     };
   };
   const priorAT = getAdTypeRev(priorPool, priorMd);
@@ -1636,13 +1726,19 @@ function renderBU(md) {
     if (!needsClientFilter) {
       const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
       let booked, clientCount;
+      const _vBs = ['preroll','midroll','integ','spots'];
+      const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
 
       // Booked cross-cuts (stored in Cr already from JSONExporter sumWhere on BOOKED_REV, still raw INR → divide)
       if (f !== 'all') {
         // Format active — platform-aware exact fields
         const fk   = formatFieldKey(f);
         const base = fk ? fk.replace('_rev','') : null;
-        if (p === 'CTV') {
+        // Cross-type mismatch: adtype=Display + video format (or vice versa) → booked = 0
+        if ((a === 'Display' && _vBs.includes(base)) || (a === 'Video' && _dBs.includes(base))) {
+          booked      = 0;
+          clientCount = 0;
+        } else if (p === 'CTV') {
           booked      = b['ctv_'  + base + '_booked']  ?? b.ctv_booked    ?? b.booked_rev;
           clientCount = b['ctv_'  + base + '_clients'] ?? b.ctv_clients   ?? b.clients;
         } else if (p === 'Mobile') {
@@ -1693,18 +1789,28 @@ clients: _buClients.length,
     if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
     if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
     const hasBooked = clients.some(c => c.booked_rev != null);
+    const buAgScale = (c) => {
+      if (CURRENT_AGENCY === 'all') return 1;
+      if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+      return c.agency === CURRENT_AGENCY ? 1 : 0;
+    };
+const buCatScale = (c) => {
+  if (CURRENT_CATEGORY === 'all') return 1;
+  if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+  return c.category === CURRENT_CATEGORY ? 1 : 0;
+};
 return {
-  rev:     r2(clients.reduce((t, c) => t + clientRev(c), 0)),
-  booked:  hasBooked ? r2(clients.reduce((t, c) => t + (c.del_rev > 0 ? (c.booked_rev || 0) * (clientRev(c) / c.del_rev) : 0), 0)) : null,
-  clients: clients.filter(c => clientRev(c) > 0).length,
+  rev:     r2(clients.reduce((t, c) => t + clientRev(c) * buAgScale(c) * buCatScale(c), 0)),
+  booked:  hasBooked ? r2(clients.reduce((t, c) => { const cr = clientRev(c) * buAgScale(c) * buCatScale(c); return t + (c.del_rev > 0 ? (c.booked_rev || 0) * (cr / c.del_rev) : 0); }, 0)) : null,
+  clients: clients.filter(c => clientRev(c) * buAgScale(c) * buCatScale(c) > 0).length,
 };
   };
 
   const anyFilterActive = CURRENT_PLATFORM !== 'all' || CURRENT_ADTYPE !== 'all'
     || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_FORMAT !== 'all' || CURRENT_CLIENT !== 'all';
 
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
-  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[AGG_LY_KEY    || lyMonthKey(CURRENT_MONTH)]    || null;
 
   const headers = [
     {label:'BU',      w:'60px'},
@@ -1794,7 +1900,7 @@ return {
       if (lRev > 0) { totalLyNum  += rev - lRev; totalLyDen  += lRev; totalLyRev += lRev; }
     }
     totalRev     += rev;
-    totalBooked  += bookedCr;
+    if (bookedCr != null) totalBooked  += bookedCr;
     totalClients += clients;
   });
 
@@ -1811,7 +1917,18 @@ return {
     '<td style="text-align:right">' + growthBadge(totalMomPct) + '</td>' +
     '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right">' + growthBadge(totalLyPct) + '</td>' +
-    '<td style="text-align:right;color:var(--ink-soft)">' + fmtInt(totalClients) + '</td>' +
+    '<td style="text-align:right;color:var(--ink-soft)">' + (() => {
+      const allBUClients = new Set();
+      (md.top_clients || []).forEach(c => {
+        const buFilter = CURRENT_BU === 'all' || c.bu === CURRENT_BU || (CURRENT_BU === 'Others' && !MAIN_BUS.includes(c.bu));
+        if (!buFilter) return;
+        if (CURRENT_CATEGORY !== 'all' && c.category !== CURRENT_CATEGORY && !(c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0)) return;
+        if (CURRENT_AGENCY   !== 'all' && c.agency   !== CURRENT_AGENCY   && !(c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0)) return;
+        if (CURRENT_CLIENT   !== 'all' && c.name     !== CURRENT_CLIENT)   return;
+        if (clientRev(c) > 0) allBUClients.add(c.name);
+      });
+      return fmtInt(allBUClients.size);
+    })() + '</td>' +
     '</tr>';
 
   document.getElementById('bu-panel').innerHTML = ptable(headers, rows + totalRow);
@@ -1840,11 +1957,19 @@ function renderPlatform(md) {
 
   const platformBookedFromStored = (pl) => {
     const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+    const _vBs = ['preroll','midroll','integ','spots'];
+    const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
     let booked;
     if (f !== 'all') {
       const fk = formatFieldKey(f);
       const base = fk ? fk.replace('_rev','') : null;
-      booked = base ? (pl[base+'_booked'] ?? pl.booked_rev) : pl.booked_rev;
+      // Cross-type mismatch → booked = 0
+      if (base && a === 'Display' && _vBs.includes(base)) return 0;
+      if (base && a === 'Video'   && _dBs.includes(base)) return 0;
+      // Platform objects don't store per-format booked — use adtype-level as best available
+      if (a === 'Video')   booked = pl.video_booked   ?? pl.booked_rev;
+      else if (a === 'Display') booked = pl.display_booked ?? pl.booked_rev;
+      else booked = pl.booked_rev;
     } else if (a === 'Video')   booked = pl.video_booked   ?? pl.booked_rev;
     else if (a === 'Display')   booked = pl.display_booked ?? pl.booked_rev;
     else                        booked = pl.booked_rev;
@@ -1853,10 +1978,17 @@ function renderPlatform(md) {
 
   const platformClientsFromStored = (pl) => {
     const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+    const _vBs = ['preroll','midroll','integ','spots'];
+    const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
     if (f !== 'all') {
       const fk = formatFieldKey(f);
       const base = fk ? fk.replace('_rev','') : null;
-      return base ? (pl[base+'_clients'] ?? pl.clients) : pl.clients;
+      if (base && a === 'Display' && _vBs.includes(base)) return 0;
+      if (base && a === 'Video'   && _dBs.includes(base)) return 0;
+      // Platform objects don't store per-format client counts — use adtype-level as best available
+      if (a === 'Video')   return pl.video_clients   ?? pl.clients;
+      if (a === 'Display') return pl.display_clients ?? pl.clients;
+      return pl.clients;
     }
     if (a === 'Video')   return pl.video_clients   ?? pl.clients;
     if (a === 'Display') return pl.display_clients ?? pl.clients;
@@ -1866,13 +1998,15 @@ function renderPlatform(md) {
   const needsClientFilterPlat = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
   const anyPlatFilterActive   = needsClientFilterPlat || CURRENT_ADTYPE !== 'all' || CURRENT_FORMAT !== 'all' || CURRENT_CLIENT !== 'all';
 
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
-  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[AGG_LY_KEY    || lyMonthKey(CURRENT_MONTH)]    || null;
 
   const getFilteredDataForPlatform = (platformName, monthData) => {
     if (!monthData) return { rev: 0, booked: 0, clients: 0 };
     const pl = monthData.platform[platformName] || {};
 
+    // When only category/agency/BU/client filters are active (no platform/adtype/format filter),
+    // use stored platform rev and compute clients from the filtered client pool
     if (!needsClientFilterPlat) {
       return {
         rev:     r2(platformRevFromStored(pl)),
@@ -1881,12 +2015,48 @@ function renderPlatform(md) {
       };
     }
 
+    // When category/agency/BU/client filter is active but NO platform/adtype/format filter,
+    // use stored rev but count clients from filtered pool
+    const p_inner = CURRENT_PLATFORM, a_inner = CURRENT_ADTYPE, f_inner = CURRENT_FORMAT;
+    if (p_inner === 'all' && a_inner === 'all' && f_inner === 'all') {
+      let filteredForCount = (monthData.top_clients || []).slice();
+      filteredForCount = filterClientsByBU(filteredForCount, CURRENT_BU);
+      if (CURRENT_CATEGORY !== 'all') filteredForCount = filteredForCount.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+      if (CURRENT_AGENCY   !== 'all') filteredForCount = filteredForCount.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+      if (CURRENT_CLIENT   !== 'all') filteredForCount = filteredForCount.filter(c => c.name === CURRENT_CLIENT);
+      const platKey_inner = platformName === 'CTV' ? 'ctv_rev' : platformName === 'Mobile' ? 'mobile_rev' : 'mobilectv_rev';
+      // Rev: sum filtered clients' platform rev (proportioned by agency scale if needed)
+      const agScaleInner = (c) => {
+        if (CURRENT_AGENCY === 'all') return 1;
+        if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+        return c.agency === CURRENT_AGENCY ? 1 : 0;
+      };
+      const platCatScaleInner = (c) => {
+        if (CURRENT_CATEGORY === 'all') return 1;
+        if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+        return c.category === CURRENT_CATEGORY ? 1 : 0;
+      };
+      const rev_inner = r2(filteredForCount.reduce((t, c) => t + (c[platKey_inner] || 0) * agScaleInner(c) * platCatScaleInner(c), 0));
+      const platClientCount_inner = filteredForCount.filter(c => (c[platKey_inner] || 0) * platCatScaleInner(c) > 0).length;
+      let bookedSum_inner = 0;
+      filteredForCount.forEach(c => {
+        const pv = (c[platKey_inner] || 0) * agScaleInner(c) * platCatScaleInner(c);
+        if (pv > 0) bookedSum_inner += c.del_rev > 0 ? (c.booked_rev || 0) * (pv / c.del_rev) : 0;
+      });
+      return { rev: rev_inner, booked: bookedSum_inner > 0 ? r2(bookedSum_inner) : null, clients: platClientCount_inner };
+    }
+
     let clients = (monthData.top_clients || []).slice();
     clients = filterClientsByBU(clients, CURRENT_BU);
     if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
     if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
     if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
 
+    const platAgScale = (c) => {
+      if (CURRENT_AGENCY === 'all') return 1;
+      if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+      return c.agency === CURRENT_AGENCY ? 1 : 0;
+    };
     const platKey = platformName === 'CTV' ? 'ctv_rev' : platformName === 'Mobile' ? 'mobile_rev' : 'mobilectv_rev';
     const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
     let rev = 0;
@@ -1906,9 +2076,16 @@ function renderPlatform(md) {
       else if (platformName === 'Mobile' && a === 'Video')   val = c.mob_video_rev   || 0;
       else if (platformName === 'Mobile' && a === 'Display') val = c.mob_display_rev || 0;
       else                                                    val = c[platKey]        || 0;
-      rev += val;
+      const platCatScale = (() => {
+        if (CURRENT_CATEGORY === 'all') return 1;
+        if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+        return c.category === CURRENT_CATEGORY ? 1 : 0;
+      })();
+      rev += val * platAgScale(c) * platCatScale;
     });
     // Approximate platform booked using platform rev ratio, count only platform-active clients
+    const _vBsP = ['preroll','midroll','integ','spots'];
+    const _dBsP = ['billboard','breakout','pause','frames','fence','untagged'];
     let bookedSum = 0;
     let platClientCount = 0;
     clients.forEach(c => {
@@ -1916,7 +2093,8 @@ function renderPlatform(md) {
       let activeVal = 0;
       if (f !== 'all') {
         const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
-        if (base) {
+        // Cross-type mismatch → activeVal stays 0
+        if (base && !((a==='Video' && _dBsP.includes(base)) || (a==='Display' && _vBsP.includes(base)))) {
           if (platformName==='CTV')             activeVal = c['ctv_' +base+'_rev'] || 0;
           else if (platformName==='Mobile')     activeVal = c['mob_' +base+'_rev'] || 0;
           else if (platformName==='Mobile+CTV') activeVal = c['mctv_'+base+'_rev'] || 0;
@@ -1940,7 +2118,10 @@ function renderPlatform(md) {
       const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
       if (f !== 'all') {
         const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
-        if (platformName==='CTV')         booked = buData['ctv_' +base+'_booked'] ?? buData.ctv_booked    ?? buData.booked_rev;
+        // Cross-type mismatch → booked = 0
+        if (base && ((a==='Display' && _vBsP.includes(base)) || (a==='Video' && _dBsP.includes(base)))) {
+          booked = 0;
+        } else if (platformName==='CTV')         booked = buData['ctv_' +base+'_booked'] ?? buData.ctv_booked    ?? buData.booked_rev;
         else if (platformName==='Mobile') booked = buData['mob_' +base+'_booked'] ?? buData.mobile_booked ?? buData.booked_rev;
         else                              booked = buData['mctv_'+base+'_booked'] ?? buData.mobilectv_booked ?? buData.booked_rev;
       } else if (platformName==='CTV'    && a==='Video')   booked = buData.ctv_video_booked;
@@ -2043,7 +2224,7 @@ function renderPlatform(md) {
       if (pRev > 0) { totalMomNum += rev - pRev; totalMomDen += pRev; totalLmRev += pRev; }
       if (lRev > 0) { totalLyNum  += rev - lRev; totalLyDen  += lRev; totalLyRev += lRev; }
     }
-    totalRev += rev; totalBooked += bookedCr; totalClients += clients;
+    totalRev += rev; if (bookedCr != null) totalBooked += bookedCr; totalClients += clients;
   });
 
   const totalMomPct = totalMomDen > 0 ? r2((totalMomNum / totalMomDen) * 100) : null;
@@ -2059,7 +2240,42 @@ function renderPlatform(md) {
     '<td style="text-align:right">' + growthBadge(totalMomPct) + '</td>' +
     '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right">' + growthBadge(totalLyPct) + '</td>' +
-    '<td style="text-align:right;color:var(--ink-soft)">' + (CURRENT_PLATFORM === 'all' ? fmtInt(totalClients) : '—') + '</td>' +
+    '<td style="text-align:right;color:var(--ink-soft)">' + (() => {
+      const _a = CURRENT_ADTYPE, _f = CURRENT_FORMAT;
+      const _vBsT = ['preroll','midroll','integ','spots'];
+      const _dBsT = ['billboard','breakout','pause','frames','fence','untagged'];
+      const allPlatClients = new Set();
+      (md.top_clients || []).forEach(c => {
+        // Apply BU filter
+        const buOk = CURRENT_BU === 'all' || c.bu === CURRENT_BU || (CURRENT_BU === 'Others' && !MAIN_BUS.includes(c.bu));
+        if (!buOk) return;
+        // Apply category filter
+        if (CURRENT_CATEGORY !== 'all' && c.category !== CURRENT_CATEGORY && !(c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0)) return;
+        // Apply agency filter
+        if (CURRENT_AGENCY !== 'all' && c.agency !== CURRENT_AGENCY && !(c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY] > 0)) return;
+        if (CURRENT_CLIENT !== 'all' && c.name !== CURRENT_CLIENT) return;
+        // Compute revenue under active platform/adtype/format
+        const getPlatRev = (platName) => {
+          const platKey = platName === 'CTV' ? 'ctv_rev' : platName === 'Mobile' ? 'mobile_rev' : 'mobilectv_rev';
+          if (_f !== 'all') {
+            const fk = formatFieldKey(_f); const base = fk ? fk.replace('_rev','') : null;
+            if (!base) return 0;
+            if ((_a === 'Display' && _vBsT.includes(base)) || (_a === 'Video' && _dBsT.includes(base))) return 0;
+            if (platName === 'CTV')        return c[`ctv_${base}_rev`]  || 0;
+            if (platName === 'Mobile')     return c[`mob_${base}_rev`]  || 0;
+            if (platName === 'Mobile+CTV') return c[`mctv_${base}_rev`] || 0;
+            return c[fk] || 0;
+          }
+          if (_a === 'Video')   { if (platName==='CTV') return c.ctv_video_rev||0; if (platName==='Mobile') return c.mob_video_rev||0; if (platName==='Mobile+CTV') return c.mobilectv_video_rev||0; }
+          if (_a === 'Display') { if (platName==='CTV') return c.ctv_display_rev||0; if (platName==='Mobile') return c.mob_display_rev||0; if (platName==='Mobile+CTV') return c.mobilectv_display_rev||0; }
+          return c[platKey] || 0;
+        };
+        const platsToCheck = CURRENT_PLATFORM === 'all' ? ['CTV','Mobile','Mobile+CTV'] : [CURRENT_PLATFORM];
+        const totalPlatRev = platsToCheck.reduce((t, pl) => t + getPlatRev(pl), 0);
+        if (totalPlatRev > 0) allPlatClients.add(c.name);
+      });
+      return fmtInt(allPlatClients.size);
+    })() + '</td>' +
   '</tr>';
 
   document.getElementById('platform-panel').innerHTML = ptable(headers, rows + totalRow);
@@ -2071,8 +2287,8 @@ function renderAdType(md) {
   const dFormats = ['Billboard','Breakout Billboard','Pause Ads','Display and Frames','Fence Ads','Untagged'];
   const allBUs   = ['LCS1','LCS2','MM1','MM2','Others'];
 
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
-  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[AGG_LY_KEY    || lyMonthKey(CURRENT_MONTH)]    || null;
 
   const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
   const needsClientFilter = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all' || CURRENT_CLIENT !== 'all';
@@ -2130,15 +2346,16 @@ function renderAdType(md) {
   const clientRev = (c, isVideo) => {
     // When category/agency filter active, scale raw rev by the category's share of that client's total
     const catScale = (() => {
-      if (CURRENT_CATEGORY !== 'all' && c.category_rev_map) {
-        const catRev = c.category_rev_map[CURRENT_CATEGORY] || 0;
-        return c.del_rev > 0 ? catRev / c.del_rev : 0;
+      let scale = 1;
+      if (CURRENT_CATEGORY !== 'all') {
+        const catRev = (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY]) || 0;
+        scale *= c.del_rev > 0 ? catRev / c.del_rev : 0;
       }
-      if (CURRENT_AGENCY !== 'all' && c.agency_rev_map) {
-        const agRev = c.agency_rev_map[CURRENT_AGENCY] || 0;
-        return c.del_rev > 0 ? agRev / c.del_rev : 0;
+      if (CURRENT_AGENCY !== 'all') {
+        const agRev = (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY]) || 0;
+        scale *= c.del_rev > 0 ? agRev / c.del_rev : 0;
       }
-      return 1;
+      return scale;
     })();
     if (catScale === 0) return 0;
 
@@ -2209,26 +2426,6 @@ clients: clientCount,
 };
     }
 
-    // Pure category filter, no BU/platform/format → read stored category data (exact, matches Excel)
-    if (CURRENT_CATEGORY !== 'all' && CURRENT_BU === 'all' && p === 'all' && f === 'all') {
-      const catData = (monthData.categories || []).find(c => c.name === CURRENT_CATEGORY) || {};
-      return {
-        rev:     isVideo ? (catData.video_rev || 0) : (catData.display_rev || 0),
-        booked:  catData.booked_rev != null ? r2(catData.booked_rev) : null,
-        clients: catData.clients || 0,
-      };
-    }
-
-    // Pure agency filter, no BU/platform/format → read stored agency data (exact)
-    if (CURRENT_AGENCY !== 'all' && CURRENT_BU === 'all' && p === 'all' && f === 'all') {
-      const agData = (monthData.agencies || []).find(ag => ag.name === CURRENT_AGENCY) || {};
-      return {
-        rev:     isVideo ? (agData.video_rev || 0) : (agData.display_rev || 0),
-        booked:  agData.booked_rev != null ? r2(agData.booked_rev) : null,
-        clients: agData.clients || 0,
-      };
-    }
-
     const filteredClients = getFilteredClients(monthData);
 
     let rev = 0;
@@ -2262,53 +2459,49 @@ clients: clientCount,
     const base = fk ? fk.replace('_rev','') : null;
     if (!base) return { rev: 0, booked: 0, clients: 0 };
 
+    // clientFormatRevFull: platform-aware but with fallback to unplatformed field
+    // Used for both client-path rev AND client counting
+    const clientFmtRev = (c) => {
+      if (p === 'CTV')        return c[`ctv_${base}_rev`]  ?? c[fk] ?? 0;
+      if (p === 'Mobile')     return c[`mob_${base}_rev`]  ?? c[fk] ?? 0;
+      if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`] ?? c[fk] ?? 0;
+      return c[fk] ?? 0;
+    };
+
     const filteredClients = getFilteredClients(monthData);
     let rev = 0, bookedRaw = 0, clientCount = 0;
 
     if (!anyFilterActive) {
+      // No filters at all: use stored format rev (aggregated), client-loop for count
       rev = monthData.ad_type?.[adType]?.formats?.[fmt] ?? 0;
+      // Booked: use unplatformed BU stored field (p is 'all' here since anyFilterActive=false)
       activeBUs.forEach(buName => {
-        const b = monthData.bu[buName] || {};
-        if (p === 'CTV')             bookedRaw += b[`ctv_${base}_booked`]  ?? 0;
-        else if (p === 'Mobile')     bookedRaw += b[`mob_${base}_booked`]  ?? 0;
-        else if (p === 'Mobile+CTV') bookedRaw += b[`mctv_${base}_booked`] ?? 0;
-        else                         bookedRaw += b[`${base}_booked`]      ?? 0;
+        bookedRaw += (monthData.bu[buName] || {})[`${base}_booked`] ?? 0;
       });
-      clientCount = (monthData.top_clients || []).filter(c => clientFormatRev(c, base) > 0).length;
+      clientCount = (monthData.top_clients || []).filter(c => clientFmtRev(c) > 0).length;
       return { rev: r2(rev), booked: bookedRaw > 0 ? r2(bookedRaw) : null, clients: clientCount };
     }
 
-    if (!needsClientFilter) {
-      activeBUs.forEach(buName => {
-        const b = monthData.bu[buName] || {};
-        if (p === 'CTV')             rev += b[`ctv_${base}_rev`]  ?? 0;
-        else if (p === 'Mobile')     rev += b[`mob_${base}_rev`]  ?? 0;
-        else if (p === 'Mobile+CTV') rev += b[`mctv_${base}_rev`] ?? 0;
-        else                         rev += b[fk] ?? 0;
-      });
-    } else {
-      rev = filteredClients.reduce((t, c) => t + clientFormatRev(c, base), 0);
-    }
+    // With any filter active (platform, BU, category, agency, format, client):
+    // Always aggregate from clients — BU stored fields lack platform×display-format cross-cuts
+    const fmtAgScale = (c) => {
+      if (CURRENT_AGENCY === 'all') return 1;
+      if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+      return c.agency === CURRENT_AGENCY ? 1 : 0;
+    };
+    const allClients = needsClientFilter ? filteredClients : getFilteredClients(monthData);
+    const fmtCatScale = (c) => { if (CURRENT_CATEGORY === 'all') return 1; if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev; return c.category === CURRENT_CATEGORY ? 1 : 0; };
+    rev = allClients.reduce((t, c) => t + clientFmtRev(c) * fmtAgScale(c) * fmtCatScale(c), 0);
 
-    if (CURRENT_CATEGORY !== 'all' || CURRENT_AGENCY !== 'all') {
-      // Pro-rate each client's booked by their format revenue share
-      bookedRaw = filteredClients.reduce((t, c) => {
-        const totalClientRev = c.del_rev || 0;
-        if (totalClientRev <= 0) return t;
-        const fmtClientRev = clientFormatRev(c, base);
-        return t + (c.booked_rev || 0) * (fmtClientRev / totalClientRev);
-      }, 0);
-    } else {
-      activeBUs.forEach(buName => {
-        const b = monthData.bu[buName] || {};
-        if (p === 'CTV')             bookedRaw += b[`ctv_${base}_booked`]  ?? 0;
-        else if (p === 'Mobile')     bookedRaw += b[`mob_${base}_booked`]  ?? 0;
-        else if (p === 'Mobile+CTV') bookedRaw += b[`mctv_${base}_booked`] ?? 0;
-        else                         bookedRaw += b[`${base}_booked`]      ?? 0;
-      });
-    }
+    // Booked: pro-rate by format rev share of each client's total del_rev
+    bookedRaw = allClients.reduce((t, c) => {
+      const totalClientRev = c.del_rev || 0;
+      if (totalClientRev <= 0) return t;
+      const fmtClientRev = clientFmtRev(c) * fmtAgScale(c) * fmtCatScale(c);
+      return t + (c.booked_rev || 0) * (fmtClientRev / totalClientRev);
+    }, 0);
 
-    clientCount = filteredClients.filter(c => clientFormatRev(c, base) > 0).length;
+    clientCount = allClients.filter(c => clientFmtRev(c) * fmtAgScale(c) * fmtCatScale(c) > 0).length;
     return { rev: r2(rev), booked: bookedRaw > 0 ? r2(bookedRaw) : null, clients: clientCount };
   };
 
@@ -2424,11 +2617,12 @@ clients: clientCount,
 
 // ── Categories ────────────────────────────────────
 function renderCategories(md) {
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
-  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[AGG_LY_KEY    || lyMonthKey(CURRENT_MONTH)]    || null;
 
   const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
   const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_AGENCY !== 'all' ||
+                          CURRENT_CATEGORY !== 'all' ||
                           p !== 'all' || a !== 'all' || f !== 'all' || CURRENT_CLIENT !== 'all';
 
   // ── Client rev for platform × adtype × format filters (no category scaling) ──
@@ -2499,6 +2693,12 @@ function renderCategories(md) {
     let rev = 0, bookedRaw = 0;
     const clientSet = new Set();
 
+    const catAgScale = (c) => {
+      if (CURRENT_AGENCY === 'all') return 1;
+      if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+      return c.agency === CURRENT_AGENCY ? 1 : 0;
+    };
+
     baseClients.forEach(c => {
       let catScale;
       if (c.category_rev_map && Object.keys(c.category_rev_map).length > 0 && c.del_rev > 0) {
@@ -2510,7 +2710,7 @@ function renderCategories(md) {
         return;
       }
 
-      const filteredRev = clientRevForFilters(c);
+      const filteredRev = clientRevForFilters(c) * catAgScale(c);
       const contribution = filteredRev * catScale;
       // Note: even if contribution is 0 (e.g. format mismatch), still count client
       // in clientSet only if they actually contributed
@@ -2581,7 +2781,7 @@ function renderCategories(md) {
 
     if (isActive) {
       totalRev    += curr.rev;
-      totalBooked += curr.booked;
+      if (curr.booked != null) totalBooked += curr.booked;
       if (prior.rev > 0) { totalMomNum += curr.rev - prior.rev; totalMomDen += prior.rev; totalLmRev += prior.rev; }
       if (ly.rev    > 0) { totalLyNum  += curr.rev - ly.rev;    totalLyDen  += ly.rev;    totalLyRev += ly.rev;    }
     }
@@ -2591,10 +2791,20 @@ function renderCategories(md) {
   const totalLyPct  = totalLyDen  > 0 ? r2((totalLyNum  / totalLyDen)  * 100) : null;
 
   // Total unique clients across filtered base pool
+  // Always compute from clients — respects category, BU, agency, platform, adtype, format
   const totalUniqueClients = (() => {
-    if (!anyFilterActive) return md.total_clients || 0;
-    const bc = getBaseClients(md);
-    return bc.filter(c => clientRevForFilters(c) > 0).length;
+    const anyRealFilterActive = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' ||
+      CURRENT_AGENCY !== 'all' || p !== 'all' || a !== 'all' || f !== 'all' || CURRENT_CLIENT !== 'all';
+    if (!anyRealFilterActive) return md.total_clients || 0;
+    // Build client pool: filter by BU + agency (base), then additionally by category
+    let pool = (md.top_clients || []).slice();
+    pool = filterClientsByBU(pool, CURRENT_BU);
+    if (CURRENT_AGENCY !== 'all') pool = pool.filter(c =>
+      c.agency === CURRENT_AGENCY || (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY] > 0));
+    if (CURRENT_CATEGORY !== 'all') pool = pool.filter(c =>
+      c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+    if (CURRENT_CLIENT !== 'all') pool = pool.filter(c => c.name === CURRENT_CLIENT);
+    return pool.filter(c => clientRevForFilters(c) > 0).length;
   })();
 
   const totalRow = `<tr style="background:var(--surface);font-weight:600;border-top:2px solid var(--border)">
@@ -2643,8 +2853,8 @@ function renderCategories(md) {
 
 // ── Agencies ──────────────────────────────────────
 function renderAgencies(md) {
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
-  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[AGG_LY_KEY    || lyMonthKey(CURRENT_MONTH)]    || null;
 
   const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
   const anyFilterActive = CURRENT_BU !== 'all' || CURRENT_CATEGORY !== 'all' ||
@@ -2730,7 +2940,12 @@ function renderAgencies(md) {
       }
 
       const filteredRev  = clientRevForFilters(c);
-      const contribution = filteredRev * agScale;
+      const agCatScale = (() => {
+        if (CURRENT_CATEGORY === 'all') return 1;
+        if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+        return c.category === CURRENT_CATEGORY ? 1 : 0;
+      })();
+      const contribution = filteredRev * agScale * agCatScale;
       if (contribution <= 0) return;
 
       rev       += contribution;
@@ -2856,18 +3071,22 @@ function renderAgencies(md) {
 
 // ── Top Clients ───────────────────────────────────
 function renderClients(md) {
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
-  const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
+  const lyMd    = DATA.months[AGG_LY_KEY    || lyMonthKey(CURRENT_MONTH)]    || null;
   const lyClientNames    = new Set((lyMd?.top_clients    || []).map(c => c.name));
   const priorClientNames = new Set((priorMd?.top_clients || []).map(c => c.name));
   const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
 
   // ── Same clientRevForFilters as other tables ─────────────────────────
   const clientRevForFilters = (c) => {
+    const _vBs = ['preroll','midroll','integ','spots'];
+    const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
     if (f !== 'all') {
       const fk = formatFieldKey(f);
       const base = fk ? fk.replace('_rev','') : null;
       if (!base) return 0;
+      if (a === 'Display' && _vBs.includes(base)) return 0;
+      if (a === 'Video'   && _dBs.includes(base)) return 0;
       if (p === 'CTV')        return c[`ctv_${base}_rev`]  ?? 0;
       if (p === 'Mobile')     return c[`mob_${base}_rev`]  ?? 0;
       if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`] ?? 0;
@@ -2905,11 +3124,16 @@ function renderClients(md) {
   if (CURRENT_CLIENT !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
 
   // ── Attach filtered rev to each client, then sort + slice ────────────
+  const agScale = (c) => {
+    if (CURRENT_AGENCY === 'all') return 1;
+    if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+    return c.agency === CURRENT_AGENCY ? 1 : 0;
+  };
   clients = clients.map(c => ({
     ...c,
-    _filteredRev:    clientRevForFilters(c),
+    _filteredRev:    r2(clientRevForFilters(c) * agScale(c)),
     _filteredBooked: c.booked_rev != null && c.del_rev > 0
-? r2(c.booked_rev * (clientRevForFilters(c) / c.del_rev))
+? r2(c.booked_rev * (clientRevForFilters(c) * agScale(c) / c.del_rev))
 : null,
   }));
   clients.sort((a, b) => b._filteredRev - a._filteredRev);
@@ -3134,7 +3358,7 @@ function renderChurners() {
   if (!panel || !DATA || !CURRENT_MONTH) return;
 
   const md      = DATA.months[CURRENT_MONTH]; if (!md) return;
-  const priorMd = DATA.months[priorMonthKey(CURRENT_MONTH)] || null;
+  const priorMd = DATA.months[AGG_PRIOR_KEY || priorMonthKey(CURRENT_MONTH)] || null;
   const lyMd    = DATA.months[lyMonthKey(CURRENT_MONTH)]    || null;
 
   const currentNames = new Set((md.top_clients || []).map(c => c.name));
@@ -3373,19 +3597,46 @@ function openClientDive(clientName) {
 
   // ── Gather 27-month history for this client ───────
   const history = [];
+  // Helper: get filter-aware revenue for a client in openClientDive
+  const _diveClientRev = (c) => {
+    if (!c) return 0;
+    const p = CURRENT_PLATFORM, a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+    const _vBs = ['preroll','midroll','integ','spots'];
+    const _dBs = ['billboard','breakout','pause','frames','fence','untagged'];
+    if (f !== 'all') {
+      const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+      if (!base) return 0;
+      if (a === 'Display' && _vBs.includes(base)) return 0;
+      if (a === 'Video'   && _dBs.includes(base)) return 0;
+      if (p === 'CTV')        return c[`ctv_${base}_rev`]  ?? 0;
+      if (p === 'Mobile')     return c[`mob_${base}_rev`]  ?? 0;
+      if (p === 'Mobile+CTV') return c[`mctv_${base}_rev`] ?? 0;
+      return c[fk] ?? 0;
+    }
+    if (a === 'Video') { if (p==='CTV') return c.ctv_video_rev??0; if (p==='Mobile') return c.mob_video_rev??0; if (p==='Mobile+CTV') return c.mobilectv_video_rev??0; return c.video_rev??0; }
+    if (a === 'Display') { if (p==='CTV') return c.ctv_display_rev??0; if (p==='Mobile') return c.mob_display_rev??0; if (p==='Mobile+CTV') return c.mobilectv_display_rev??0; return c.display_rev??0; }
+    if (p === 'CTV')        return c.ctv_rev        ?? 0;
+    if (p === 'Mobile')     return c.mobile_rev     ?? 0;
+    if (p === 'Mobile+CTV') return c.mobilectv_rev  ?? 0;
+    return c.del_rev ?? 0;
+  };
+
   DATA.available_months.forEach(mkey => {
     const mdata = DATA.months[mkey];
     if (!mdata) return;
     const client = (mdata.top_clients || []).find(c => c.name === clientName);
+    const filtRev = _diveClientRev(client);
     history.push({
       mkey,
       label:      mdata.label || mkey,
-      del_rev:    client ? r2(client.del_rev    || 0) : 0,
+      del_rev:    filtRev,
       ctv_rev:    client ? r2(client.ctv_rev    || 0) : 0,
       mobile_rev: client ? r2(client.mobile_rev || 0) : 0,
       video_rev:  client ? r2(client.video_rev  || 0) : 0,
       display_rev:client ? r2(client.display_rev|| 0) : 0,
-      booked_rev: client && client.booked_rev != null ? r2(client.booked_rev) : null,
+      booked_rev: client && client.booked_rev != null
+        ? r2(client.booked_rev * (client.del_rev > 0 ? filtRev / client.del_rev : 1))
+        : null,
       bu:         client ? client.bu       : '—',
       category:   client ? client.category : '—',
       agency:     client ? client.agency   : '—',
