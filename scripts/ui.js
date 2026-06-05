@@ -1814,16 +1814,71 @@ return {
 
   const headers = [
     {label:'BU',      w:'60px'},
-    {label:'Del Rev', right:true, w:'80px'},
-    {label:'Booked',  right:true, w:'80px'},
-    {label:'Target',  right:true, w:'70px'},
-    {label:'Ach%',    right:true, w:'60px'},
-    {label:'LM Rev',  right:true, w:'80px'},
-    {label:'vs LM',   right:true, w:'72px'},
-    {label:'LY Rev',  right:true, w:'80px'},
-    {label:'vs LY',   right:true, w:'72px'},
-    {label:'Clients', right:true, w:'60px'},
+    {label:'Del Rev', right:true, w:'76px'},
+    {label:'Booked',  right:true, w:'76px'},
+    {label:'LM Rev',  right:true, w:'72px'},
+    {label:'MoM',     right:true, w:'62px'},
+    {label:'LY Rev',  right:true, w:'72px'},
+    {label:'YoY',     right:true, w:'62px'},
+    {label:'CTV%',    right:true, w:'58px'},
+    {label:'Clients', right:true, w:'58px'},
   ];
+  // ── CTV% helper — % of currently filtered revenue that came from CTV ──
+  const buCtvPct = (bu, monthData) => {
+    if (!monthData) return null;
+    if (CURRENT_PLATFORM === 'CTV')        return 100;
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+
+    const b = monthData.bu[bu] || {};
+
+    // When category/agency/client filter is active, we cannot trust stored b.ctv_rev
+    // because it is unfiltered. We must aggregate CTV rev from top_clients
+    // using the same filter logic as getFilteredData.
+    if (needsClientFilter) {
+      let clients = (monthData.top_clients || []).slice();
+      clients = filterClientsByBU(clients, bu);
+      if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+      if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+      if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
+
+      let filteredCtvRev = 0, filteredTotalRev = 0;
+      clients.forEach(c => {
+        const agScale  = (CURRENT_AGENCY === 'all' || !c.agency_rev_map || c.del_rev <= 0) ? 1 : (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+        const catScale = (CURRENT_CATEGORY === 'all' || !c.category_rev_map || c.del_rev <= 0) ? 1 : (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+        const scale    = agScale * catScale;
+        // Total filtered rev for this client (same as getFilteredData)
+        filteredTotalRev += clientRev(c) * scale;
+        // CTV rev for this client under active adtype/format, scaled same way
+        const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+        let cRev = 0;
+        if (f !== 'all') {
+          const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+          cRev = base ? (c['ctv_' + base + '_rev'] ?? 0) : 0;
+        } else if (a === 'Video')   { cRev = c.ctv_video_rev   ?? 0; }
+        else if (a === 'Display')   { cRev = c.ctv_display_rev ?? 0; }
+        else                        { cRev = c.ctv_rev         ?? 0; }
+        filteredCtvRev += cRev * scale;
+      });
+
+      if (filteredTotalRev <= 0) return null;
+      return Math.round((filteredCtvRev / filteredTotalRev) * 100);
+    }
+
+    // No category/agency/client filter — safe to use stored BU fields directly
+    const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+    let ctvRev = 0;
+    if (f !== 'all') {
+      const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+      ctvRev = base ? (b['ctv_' + base + '_rev'] ?? 0) : 0;
+    } else if (a === 'Video')   { ctvRev = b.ctv_video_rev   ?? 0; }
+    else if (a === 'Display')   { ctvRev = b.ctv_display_rev ?? 0; }
+    else                        { ctvRev = b.ctv_rev ?? 0; }
+
+    const totalRevStored = r2(buRevFromStored(b));
+    if (!totalRevStored || totalRevStored <= 0) return null;
+    return Math.round((ctvRev / totalRevStored) * 100);
+  };
 
   const rows = buList.map(bu => {
     const b       = md.bu[bu] || {};
@@ -1855,16 +1910,20 @@ return {
       lyRev = r2(activeRevField(lyB)    || 0) > 0 ? r2(activeRevField(lyB))    : null;
     }
 
+    const ctvPct = buCtvPct(bu, md);
+    const ctvPctDisplay = CURRENT_PLATFORM === 'Mobile' ? '<span style="color:var(--ink-faint)">0%</span>'
+      : ctvPct === null ? '—'
+      : ctvPct === 100  ? '<span style="color:var(--green);font-weight:600">100%</span>'
+      : `<span style="color:var(--accent);font-weight:500">${ctvPct}%</span>`;
     return `<tr style="${!isActive?'opacity:0.3':''}">
       <td><span class="badge ${cls}">${bu}</span></td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${bookedCr != null ? fmtNum(bookedCr) + ' Cr' : '—'}</td>
-      <td style="text-align:right;color:var(--ink-soft)">—</td>
-      <td style="text-align:right;color:var(--ink-soft)">—</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${lmRev !== null ? fmtNum(lmRev) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${lyRev !== null ? fmtNum(lyRev) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
+      <td style="text-align:right">${ctvPctDisplay}</td>
       <td style="text-align:right;color:var(--ink-soft)">${clients}</td>
     </tr>`;
   }).join('');
@@ -1907,16 +1966,61 @@ return {
   const totalMomPct = totalMomDen > 0 ? r2((totalMomNum / totalMomDen) * 100) : null;
   const totalLyPct  = totalLyDen  > 0 ? r2((totalLyNum  / totalLyDen)  * 100) : null;
 
+  // CTV% for total row
+  const totalCtvPct = (() => {
+    if (CURRENT_PLATFORM === 'CTV')        return 100;
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+    let grandCtvRev = 0;
+    buList.forEach(bu => {
+      const isActive = CURRENT_BU === 'all' || CURRENT_BU === bu;
+      if (!isActive) return;
+      if (needsClientFilter) {
+        let clients = (md.top_clients || []).slice();
+        clients = filterClientsByBU(clients, bu);
+        if (CURRENT_CATEGORY !== 'all') clients = clients.filter(c => c.category === CURRENT_CATEGORY || (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0));
+        if (CURRENT_AGENCY   !== 'all') clients = clients.filter(c => c.agency   === CURRENT_AGENCY   || (c.agency_rev_map   && c.agency_rev_map[CURRENT_AGENCY]   > 0));
+        if (CURRENT_CLIENT   !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
+        clients.forEach(c => {
+          const agScale  = (CURRENT_AGENCY === 'all' || !c.agency_rev_map || c.del_rev <= 0) ? 1 : (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+          const catScale = (CURRENT_CATEGORY === 'all' || !c.category_rev_map || c.del_rev <= 0) ? 1 : (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+          const scale    = agScale * catScale;
+          const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+          let cRev = 0;
+          if (f !== 'all') {
+            const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+            cRev = base ? (c['ctv_' + base + '_rev'] ?? 0) : 0;
+          } else if (a === 'Video')   { cRev = c.ctv_video_rev   ?? 0; }
+          else if (a === 'Display')   { cRev = c.ctv_display_rev ?? 0; }
+          else                        { cRev = c.ctv_rev         ?? 0; }
+          grandCtvRev += cRev * scale;
+        });
+      } else {
+        const b = md.bu[bu] || {};
+        const a = CURRENT_ADTYPE, f = CURRENT_FORMAT;
+        if (f !== 'all') {
+          const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+          grandCtvRev += base ? (b['ctv_' + base + '_rev'] ?? 0) : 0;
+        } else if (a === 'Video')   { grandCtvRev += b.ctv_video_rev   ?? 0; }
+        else if (a === 'Display')   { grandCtvRev += b.ctv_display_rev ?? 0; }
+        else                        { grandCtvRev += b.ctv_rev ?? 0; }
+      }
+    });
+    return totalRev > 0 ? Math.round((grandCtvRev / totalRev) * 100) : null;
+  })();
+  const totalCtvDisplay = CURRENT_PLATFORM === 'Mobile' ? '0%'
+    : totalCtvPct === null ? '—'
+    : totalCtvPct + '%';
+
   const totalRow = '<tr style="background:var(--surface);font-weight:600;border-top:2px solid var(--border)">' +
     '<td><span class="badge badge-gray">Total</span></td>' +
     '<td style="text-align:right;font-family:var(--mono);font-weight:600">' + fmtNum(r2(totalRev)) + ' Cr</td>' +
     '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—') + '</td>' +
-    '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
-    '<td style="text-align:right;color:var(--ink-soft)">—</td>' +
     '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalLmRev > 0 ? fmtNum(r2(totalLmRev)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right">' + growthBadge(totalMomPct) + '</td>' +
     '<td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">' + (totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—') + '</td>' +
     '<td style="text-align:right">' + growthBadge(totalLyPct) + '</td>' +
+    '<td style="text-align:right;font-weight:600;color:var(--accent)">' + totalCtvDisplay + '</td>' +
     '<td style="text-align:right;color:var(--ink-soft)">' + (() => {
       const allBUClients = new Set();
       (md.top_clients || []).forEach(c => {
@@ -2406,6 +2510,7 @@ function renderAdType(md) {
     if (CURRENT_CLIENT !== 'all') clients = clients.filter(c => c.name === CURRENT_CLIENT);
     return clients;
   };
+  
 
   const getAdTypeData = (adType, monthData) => {
     if (!monthData) return { rev: 0, booked: 0, clients: 0 };
@@ -2504,6 +2609,90 @@ clients: clientCount,
     clientCount = allClients.filter(c => clientFmtRev(c) * fmtAgScale(c) * fmtCatScale(c) > 0).length;
     return { rev: r2(rev), booked: bookedRaw > 0 ? r2(bookedRaw) : null, clients: clientCount };
   };
+  // ── CTV% helpers ──────────────────────────────────────────────────────
+  // IMPORTANT: clientRev(c, isVideo) already applies catScale*agScale internally.
+  // Do NOT multiply by scale again here — that causes >100% values.
+  // For numerator (CTV rev), apply the same catScale*agScale manually since
+  // c.ctv_video_rev is a raw field with no built-in scaling.
+
+  const _getCatAgScale = (c) => {
+    let scale = 1;
+    if (CURRENT_CATEGORY !== 'all') {
+      const catRev = (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY]) || 0;
+      scale *= c.del_rev > 0 ? catRev / c.del_rev : 0;
+    }
+    if (CURRENT_AGENCY !== 'all') {
+      const agRev = (c.agency_rev_map && c.agency_rev_map[CURRENT_AGENCY]) || 0;
+      scale *= c.del_rev > 0 ? agRev / c.del_rev : 0;
+    }
+    return scale;
+  };
+
+  const adTypeCtvPct = (adType, monthData) => {
+    if (!monthData) return null;
+    if (CURRENT_PLATFORM === 'CTV')        return 100;
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+
+    const isVideo = adType === 'Video';
+    if (f !== 'all') {
+      if (isVideo  && dFormats.includes(f)) return null;
+      if (!isVideo && vFormats.includes(f)) return null;
+    }
+
+    // ad_type stored object has NO ctv breakdown fields — always compute from clients
+    const clients = needsClientFilter ? getFilteredClients(monthData) : (monthData.top_clients || []);
+    let ctvRev = 0, totalRev = 0;
+    clients.forEach(c => {
+      const scale = _getCatAgScale(c);
+      if (scale === 0) return;
+      // Denominator: clientRev already applies scale internally
+      totalRev += clientRev(c, isVideo);
+      // Numerator: raw CTV field × scale applied manually
+      let cRev = 0;
+      if (f !== 'all') {
+        const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+        cRev = base ? (c['ctv_' + base + '_rev'] ?? 0) : 0;
+      } else if (isVideo)  { cRev = c.ctv_video_rev   ?? 0; }
+      else                 { cRev = c.ctv_display_rev ?? 0; }
+      ctvRev += cRev * scale;
+    });
+    if (totalRev <= 0) return null;
+    return Math.round((ctvRev / totalRev) * 100);
+  };
+
+  const fmtCtvPct = (fmt, adType, monthData) => {
+    if (!monthData) return null;
+    if (CURRENT_PLATFORM === 'CTV')        return 100;
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+
+    const fk = formatFieldKey(fmt);
+    const base = fk ? fk.replace('_rev','') : null;
+    if (!base) return null;
+
+    // ad_type stored object has NO ctv breakdown fields — always compute from clients
+    const clients = needsClientFilter ? getFilteredClients(monthData) : (monthData.top_clients || []);
+    let ctvRev = 0, totalRev = 0;
+    clients.forEach(c => {
+      const scale = _getCatAgScale(c);
+      if (scale === 0) return;
+      // Denominator: raw format rev × scale
+      totalRev += (c[fk] ?? 0) * scale;
+      // Numerator: CTV slice of that format × same scale
+      ctvRev += (c['ctv_' + base + '_rev'] ?? 0) * scale;
+    });
+    if (totalRev <= 0) return null;
+    return Math.round((ctvRev / totalRev) * 100);
+  };
+
+  const renderCtvPct = (pct) => {
+    if (CURRENT_PLATFORM === 'Mobile') return '<span style="color:var(--ink-faint)">0%</span>';
+    if (pct === null || pct === undefined) return '<span style="color:var(--ink-faint)">—</span>';
+    if (pct === 0)   return '<span style="color:var(--ink-faint)">0%</span>';
+    if (pct === 100) return '<span style="color:var(--green);font-weight:600">100%</span>';
+    return `<span style="color:var(--accent);font-weight:500">${pct}%</span>`;
+  };  
 
   // ── Build table ────────────────────────────────────────────────────────
   const headers = [
@@ -2514,6 +2703,7 @@ clients: clientCount,
     {label:'vs LM',    right:true, w:'72px'},
     {label:'LY Rev',   right:true, w:'80px'},
     {label:'vs LY',    right:true, w:'72px'},
+    {label:'CTV%',     right:true, w:'58px'},
     {label:'Clients',  right:true, w:'60px'},
     {label:'Share',    right:true, w:'52px'},
   ];
@@ -2543,6 +2733,7 @@ clients: clientCount,
     const loyPct = ly.rev    > 0 ? r2(((curr.rev - ly.rev)    / ly.rev)    * 100) : null;
     const share  = curr.rev  > 0 ? Math.round((curr.rev / shareDenom) * 100)      : 0;
     const badgeCls = a === adType ? 'badge-green' : (isVideo ? 'badge-blue' : 'badge-amber');
+    const ctvPct = adTypeCtvPct(adType, md);
 
     rows += `<tr style="${!isTypeActive ? 'opacity:0.3' : ''}background:var(--surface)">
       <td style="font-weight:500"><span class="badge ${badgeCls}">${adType}</span></td>
@@ -2552,6 +2743,7 @@ clients: clientCount,
       <td style="text-align:right">${growthBadge(momPct)}</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${ly.rev > 0 ? fmtNum(r2(ly.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
+      <td style="text-align:right">${renderCtvPct(ctvPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
       <td style="text-align:right;color:var(--ink-soft)">${share}%</td>
     </tr>`;
@@ -2575,6 +2767,7 @@ clients: clientCount,
           <td style="text-align:right;font-size:12px">${growthBadge(fmtMomPct)}</td>
           <td style="text-align:right;font-family:var(--mono);font-size:12px;color:var(--ink-soft)">${fdLy.rev > 0 ? fmtNum(r2(fdLy.rev)) + ' Cr' : '—'}</td>
           <td style="text-align:right;font-size:12px">${growthBadge(fmtLoyPct)}</td>
+          <td style="text-align:right;font-size:12px">${renderCtvPct(fmtCtvPct(fmt, adType, md))}</td>
           <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${fd.clients}</td>
           <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${fmtShare}%</td>
         </tr>`;
@@ -2600,6 +2793,61 @@ clients: clientCount,
     return fc.filter(c => clientRev(c, true) > 0 || clientRev(c, false) > 0).length;
   })();
 
+  const totalCtvPct = (() => {
+    if (CURRENT_PLATFORM === 'CTV')        return 100;
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+
+    const activeTypes = ['Video','Display'].filter(at => {
+      if (a !== 'all' && a !== at) return false;
+      if (f !== 'all') {
+        const isVid = at === 'Video';
+        if (isVid  && dFormats.includes(f)) return false;
+        if (!isVid && vFormats.includes(f)) return false;
+      }
+      return true;
+    });
+
+    let grandCtvRev = 0, grandTotalRev = 0;
+
+    if (needsClientFilter) {
+      const clients = getFilteredClients(md);
+      clients.forEach(c => {
+        const scale = _getCatAgScale(c);
+        activeTypes.forEach(at => {
+          const isVid = at === 'Video';
+          // Denominator: clientRev already applies scale internally — do NOT multiply again
+          grandTotalRev += clientRev(c, isVid);
+          // Numerator: raw CTV field × scale (applied manually)
+          let cRev = 0;
+          if (f !== 'all') {
+            const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+            cRev = base ? (c['ctv_' + base + '_rev'] ?? 0) : 0;
+          } else if (isVid)  { cRev = c.ctv_video_rev   ?? 0; }
+          else               { cRev = c.ctv_display_rev ?? 0; }
+          grandCtvRev += cRev * scale;
+        });
+      });
+    } else {
+      // ad_type stored has no CTV breakdown — must use top_clients
+      const clients = md.top_clients || [];
+      clients.forEach(c => {
+        activeTypes.forEach(at => {
+          const isVid = at === 'Video';
+          grandTotalRev += clientRev(c, isVid);   // scale=1 since no cat/ag filter here
+          let cRev = 0;
+          if (f !== 'all') {
+            const fk = formatFieldKey(f); const base = fk ? fk.replace('_rev','') : null;
+            cRev = base ? (c['ctv_' + base + '_rev'] ?? 0) : 0;
+          } else if (isVid)  { cRev = c.ctv_video_rev   ?? 0; }
+          else               { cRev = c.ctv_display_rev ?? 0; }
+          grandCtvRev += cRev;
+        });
+      });
+    }
+    return grandTotalRev > 0 ? Math.round((grandCtvRev / grandTotalRev) * 100) : null;
+  })();
+
   const totalRow = `<tr style="background:var(--surface);font-weight:600;border-top:2px solid var(--border)">
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRevSum))} Cr</td>
@@ -2608,6 +2856,7 @@ clients: clientCount,
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
     <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLyRevSum > 0 ? fmtNum(r2(totalLyRevSum)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
+    <td style="text-align:right;font-weight:600;color:var(--accent)">${renderCtvPct(totalCtvPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
   </tr>`;
@@ -2736,15 +2985,61 @@ function renderCategories(md) {
   const allRevs    = catPairs.map(p => p.rev);
   const shareDenom = allRevs.reduce((t, d) => t + d.rev, 0) || 1;
 
+  // ── CTV% helper — always client-loop based to keep numerator/denominator scope identical ──
+  const catCtvPct = (catName, monthData) => {
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+    if (!monthData) return null;
+    const baseClients = getBaseClients(monthData);
+    let ctvRev = 0, totalRev = 0;
+    const catAgScale = (c) => {
+      if (CURRENT_AGENCY === 'all') return 1;
+      if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+      return c.agency === CURRENT_AGENCY ? 1 : 0;
+    };
+    baseClients.forEach(c => {
+      let catScale;
+      if (c.category_rev_map && Object.keys(c.category_rev_map).length > 0 && c.del_rev > 0) {
+        catScale = (c.category_rev_map[catName] || 0) / c.del_rev;
+        if (catScale <= 0) return;
+      } else if (c.category === catName) {
+        catScale = 1;
+      } else {
+        return;
+      }
+      const scale = catScale * catAgScale(c);
+      totalRev += clientRevForFilters(c) * scale;
+      // CTV numerator: same catScale+agScale applied to ctv_rev slice
+      const f = CURRENT_FORMAT, a = CURRENT_ADTYPE;
+      let cRev = 0;
+      if (f !== 'all') {
+        const fk = formatFieldKey(f);
+        const base = fk ? fk.replace('_rev','') : null;
+        cRev = base ? (c[`ctv_${base}_rev`] ?? 0) : 0;
+      } else if (a === 'Video')   { cRev = c.ctv_video_rev   ?? 0; }
+        else if (a === 'Display') { cRev = c.ctv_display_rev ?? 0; }
+        else                      { cRev = c.ctv_rev         ?? 0; }
+      ctvRev += cRev * scale;
+    });
+    return totalRev > 0 ? Math.round((ctvRev / totalRev) * 100) : null;
+  };
+
+  const renderCtvPct = (pct) => {
+    if (CURRENT_PLATFORM === 'Mobile') return '<span style="color:var(--ink-faint)">0%</span>';
+    if (pct === null || pct === undefined) return '<span style="color:var(--ink-faint)">—</span>';
+    if (pct === 0)   return '<span style="color:var(--ink-faint)">0%</span>';
+    if (pct === 100) return '<span style="color:var(--green);font-weight:600">100%</span>';
+    return `<span style="color:var(--accent);font-weight:500">${pct}%</span>`;
+  };
+
   const headers = [
     {label:'#',       w:'28px'},
     {label:'Category'},
     {label:'Del Rev', right:true, w:'80px'},
     {label:'Booked',  right:true, w:'80px'},
-    {label:'LM Rev',  right:true, w:'80px'},
-    {label:'vs LM',   right:true, w:'72px'},
-    {label:'LY Rev',  right:true, w:'80px'},
-    {label:'vs LY',   right:true, w:'72px'},
+    {label:'MoM',     right:true, w:'72px'},
+    {label:'YoY',     right:true, w:'72px'},
+    {label:'CTV%',    right:true, w:'60px'},
     {label:'Clients', right:true, w:'60px'},
     {label:'Share',   right:true, w:'52px'},
   ];
@@ -2766,15 +3061,15 @@ function renderCategories(md) {
     const share   = curr.rev  > 0 ? Math.round((curr.rev / shareDenom) * 100)       : 0;
     const isActive = CURRENT_CATEGORY === 'all' || CURRENT_CATEGORY === cat.name;
 
+    const ctvPct = catCtvPct(cat.name, md);
     rows += `<tr style="${!isActive ? 'opacity:0.3' : ''}">
       <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
       <td style="font-weight:500;cursor:pointer" onclick="openDiagDrilldown('Category','${cat.name.replace(/'/g,"\\'")}',${momPct ?? 0},true)"><span style="color:var(--accent);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px">${cat.name}</span> ${momPct !== null ? (momPct >= 20 ? '<span style="color:var(--green);font-size:11px">↑↑</span>' : momPct >= 5 ? '<span style="color:var(--green);font-size:11px">↑</span>' : momPct <= -20 ? '<span style="color:var(--red);font-size:11px">↓↓</span>' : momPct <= -5 ? '<span style="color:var(--red);font-size:11px">↓</span>' : '') : ''}</td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${prior.rev > 0 ? fmtNum(r2(prior.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${ly.rev > 0 ? fmtNum(r2(ly.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
+      <td style="text-align:right">${renderCtvPct(ctvPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
       <td style="text-align:right;color:var(--ink-soft)">${share}%</td>
     </tr>`;
@@ -2807,15 +3102,63 @@ function renderCategories(md) {
     return pool.filter(c => clientRevForFilters(c) > 0).length;
   })();
 
+  const totalCtvPct = (() => {
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+    const baseClients = getBaseClients(md);
+    let ctvRev = 0, totalRevForCtv = 0;
+    const catAgScale = (c) => {
+      if (CURRENT_AGENCY === 'all') return 1;
+      if (c.agency_rev_map && c.del_rev > 0) return (c.agency_rev_map[CURRENT_AGENCY] || 0) / c.del_rev;
+      return c.agency === CURRENT_AGENCY ? 1 : 0;
+    };
+    baseClients.forEach(c => {
+      // For the total row, apply category filter too (same as totalUniqueClients)
+      if (CURRENT_CATEGORY !== 'all') {
+        const inCat = c.category === CURRENT_CATEGORY ||
+          (c.category_rev_map && c.category_rev_map[CURRENT_CATEGORY] > 0);
+        if (!inCat) return;
+        const catScale = c.category_rev_map && c.del_rev > 0
+          ? (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev
+          : 1;
+        const scale = catScale * catAgScale(c);
+        totalRevForCtv += clientRevForFilters(c) * scale;
+        const f2 = CURRENT_FORMAT, a2 = CURRENT_ADTYPE;
+        let cRev = 0;
+        if (f2 !== 'all') {
+          const fk = formatFieldKey(f2);
+          const base = fk ? fk.replace('_rev','') : null;
+          cRev = base ? (c[`ctv_${base}_rev`] ?? 0) : 0;
+        } else if (a2 === 'Video')   { cRev = c.ctv_video_rev   ?? 0; }
+          else if (a2 === 'Display') { cRev = c.ctv_display_rev ?? 0; }
+          else                       { cRev = c.ctv_rev         ?? 0; }
+        ctvRev += cRev * scale;
+      } else {
+        const scale = catAgScale(c);
+        totalRevForCtv += clientRevForFilters(c) * scale;
+        const f2 = CURRENT_FORMAT, a2 = CURRENT_ADTYPE;
+        let cRev = 0;
+        if (f2 !== 'all') {
+          const fk = formatFieldKey(f2);
+          const base = fk ? fk.replace('_rev','') : null;
+          cRev = base ? (c[`ctv_${base}_rev`] ?? 0) : 0;
+        } else if (a2 === 'Video')   { cRev = c.ctv_video_rev   ?? 0; }
+          else if (a2 === 'Display') { cRev = c.ctv_display_rev ?? 0; }
+          else                       { cRev = c.ctv_rev         ?? 0; }
+        ctvRev += cRev * scale;
+      }
+    });
+    return totalRevForCtv > 0 ? Math.round((ctvRev / totalRevForCtv) * 100) : null;
+  })();
+
   const totalRow = `<tr style="background:var(--surface);font-weight:600;border-top:2px solid var(--border)">
     <td></td>
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRev))} Cr</td>
     <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—'}</td>
-    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLmRev > 0 ? fmtNum(r2(totalLmRev)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
-    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
+    <td style="text-align:right;font-weight:600;color:var(--accent)">${renderCtvPct(totalCtvPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
   </tr>`;
@@ -2838,7 +3181,6 @@ function renderCategories(md) {
           <span style="font-size:10px;font-weight:600;background:var(--amber);color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px">No Category</span>
         </td>
         <td style="text-align:right;font-family:var(--mono);font-weight:500;color:var(--amber)">${fmtNum(untaggedCatRev)} Cr</td>
-        <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
@@ -2966,15 +3308,59 @@ function renderAgencies(md) {
   const allRevs    = agPairs.map(p => p.rev);
   const shareDenom = allRevs.reduce((t, d) => t + d.rev, 0) || 1;
 
+  // ── CTV% helper — client-loop based; numerator and denominator always same scope ──
+  const agCtvPct = (agName, monthData) => {
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+    if (!monthData) return null;
+    const baseClients = getBaseClients(monthData);
+    let ctvRev = 0, totalRev = 0;
+    baseClients.forEach(c => {
+      let agScale;
+      if (c.agency_rev_map && Object.keys(c.agency_rev_map).length > 0 && c.del_rev > 0) {
+        agScale = (c.agency_rev_map[agName] || 0) / c.del_rev;
+        if (agScale <= 0) return;
+      } else if (c.agency === agName) {
+        agScale = 1;
+      } else {
+        return;
+      }
+      const agCatScale = (() => {
+        if (CURRENT_CATEGORY === 'all') return 1;
+        if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+        return c.category === CURRENT_CATEGORY ? 1 : 0;
+      })();
+      const scale = agScale * agCatScale;
+      totalRev += clientRevForFilters(c) * scale;
+      let cRev = 0;
+      if (f !== 'all') {
+        const fk = formatFieldKey(f);
+        const base = fk ? fk.replace('_rev','') : null;
+        cRev = base ? (c[`ctv_${base}_rev`] ?? 0) : 0;
+      } else if (a === 'Video')   { cRev = c.ctv_video_rev   ?? 0; }
+        else if (a === 'Display') { cRev = c.ctv_display_rev ?? 0; }
+        else                      { cRev = c.ctv_rev         ?? 0; }
+      ctvRev += cRev * scale;
+    });
+    return totalRev > 0 ? Math.round((ctvRev / totalRev) * 100) : null;
+  };
+
+  const renderCtvPct = (pct) => {
+    if (CURRENT_PLATFORM === 'Mobile') return '<span style="color:var(--ink-faint)">0%</span>';
+    if (pct === null || pct === undefined) return '<span style="color:var(--ink-faint)">—</span>';
+    if (pct === 0)   return '<span style="color:var(--ink-faint)">0%</span>';
+    if (pct === 100) return '<span style="color:var(--green);font-weight:600">100%</span>';
+    return `<span style="color:var(--accent);font-weight:500">${pct}%</span>`;
+  };
+
   const headers = [
     {label:'#',       w:'28px'},
     {label:'Agency'},
     {label:'Del Rev', right:true, w:'80px'},
     {label:'Booked',  right:true, w:'80px'},
-    {label:'LM Rev',  right:true, w:'80px'},
-    {label:'vs LM',   right:true, w:'72px'},
-    {label:'LY Rev',  right:true, w:'80px'},
-    {label:'vs LY',   right:true, w:'72px'},
+    {label:'MoM',     right:true, w:'72px'},
+    {label:'YoY',     right:true, w:'72px'},
+    {label:'CTV%',    right:true, w:'60px'},
     {label:'Clients', right:true, w:'60px'},
     {label:'Share',   right:true, w:'52px'},
   ];
@@ -2995,15 +3381,15 @@ function renderAgencies(md) {
     const share    = curr.rev  > 0 ? Math.round((curr.rev / shareDenom) * 100)       : 0;
     const isActive = CURRENT_AGENCY === 'all' || CURRENT_AGENCY === ag.name;
 
+    const ctvPct = agCtvPct(ag.name, md);
     rows += `<tr style="${!isActive ? 'opacity:0.3' : ''}">
       <td style="font-family:var(--mono);font-size:11px;color:var(--ink-soft)">${i+1}</td>
       <td style="font-weight:500;cursor:pointer" onclick="openDiagDrilldown('Agency','${ag.name.replace(/'/g,"\\'")}',${momPct ?? 0},true)"><span style="color:var(--accent);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px">${ag.name}</span></td>
       <td style="text-align:right;font-family:var(--mono);font-weight:500">${fmtNum(curr.rev)} Cr</td>
       <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${curr.booked != null ? fmtNum(curr.booked) + ' Cr' : '—'}</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${prior.rev > 0 ? fmtNum(r2(prior.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(momPct)}</td>
-      <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${ly.rev > 0 ? fmtNum(r2(ly.rev)) + ' Cr' : '—'}</td>
       <td style="text-align:right">${growthBadge(loyPct)}</td>
+      <td style="text-align:right">${renderCtvPct(ctvPct)}</td>
       <td style="text-align:right;color:var(--ink-soft)">${curr.clients || '—'}</td>
       <td style="text-align:right;color:var(--ink-soft)">${share}%</td>
     </tr>`;
@@ -3025,15 +3411,41 @@ function renderAgencies(md) {
     return bc.filter(c => clientRevForFilters(c) > 0).length;
   })();
 
+  const totalCtvPct = (() => {
+    if (CURRENT_PLATFORM === 'Mobile')     return 0;
+    if (CURRENT_PLATFORM === 'Mobile+CTV') return null;
+    const baseClients = getBaseClients(md);
+    let ctvRev = 0, totalRevForCtv = 0;
+    baseClients.forEach(c => {
+      const agCatScale = (() => {
+        if (CURRENT_CATEGORY === 'all') return 1;
+        if (c.category_rev_map && c.del_rev > 0) return (c.category_rev_map[CURRENT_CATEGORY] || 0) / c.del_rev;
+        return c.category === CURRENT_CATEGORY ? 1 : 0;
+      })();
+      if (agCatScale <= 0) return;
+      // For total row, no agency filter — all clients in base pool contribute at full agency weight
+      totalRevForCtv += clientRevForFilters(c) * agCatScale;
+      let cRev = 0;
+      if (f !== 'all') {
+        const fk = formatFieldKey(f);
+        const base = fk ? fk.replace('_rev','') : null;
+        cRev = base ? (c[`ctv_${base}_rev`] ?? 0) : 0;
+      } else if (a === 'Video')   { cRev = c.ctv_video_rev   ?? 0; }
+        else if (a === 'Display') { cRev = c.ctv_display_rev ?? 0; }
+        else                      { cRev = c.ctv_rev         ?? 0; }
+      ctvRev += cRev * agCatScale;
+    });
+    return totalRevForCtv > 0 ? Math.round((ctvRev / totalRevForCtv) * 100) : null;
+  })();
+
   const totalRow = `<tr style="background:var(--surface);font-weight:600;border-top:2px solid var(--border)">
     <td></td>
     <td><span class="badge badge-gray">Total</span></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRev))} Cr</td>
     <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—'}</td>
-    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLmRev > 0 ? fmtNum(r2(totalLmRev)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalMomPct)}</td>
-    <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalLyRev > 0 ? fmtNum(r2(totalLyRev)) + ' Cr' : '—'}</td>
     <td style="text-align:right">${growthBadge(totalLyPct)}</td>
+    <td style="text-align:right;font-weight:600;color:var(--accent)">${renderCtvPct(totalCtvPct)}</td>
     <td style="text-align:right;color:var(--ink-soft)">${fmtInt(totalUniqueClients)}</td>
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
   </tr>`;
@@ -3056,7 +3468,6 @@ function renderAgencies(md) {
           <span style="font-size:10px;font-weight:600;background:var(--amber);color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px">No Agency</span>
         </td>
         <td style="text-align:right;font-family:var(--mono);font-weight:500;color:var(--amber)">${fmtNum(untaggedAgRev)} Cr</td>
-        <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
         <td style="text-align:right;color:var(--ink-soft)">—</td>
@@ -3202,7 +3613,7 @@ function renderClients(md) {
       const bBooked    = (c.booked_rev != null && c.del_rev > 0 && b.del_rev > 0)
         ? r2(c.booked_rev * (b.del_rev / c.del_rev)) : null;
       return `<tr class="brand-row" id="brands-${i}" style="display:none;background:var(--surface)">
-    <td colspan="15" style="padding:5px 12px 5px 44px;border-bottom:1px solid var(--surface-2)">
+    <td colspan="14" style="padding:5px 12px 5px 44px;border-bottom:1px solid var(--surface-2)">
       <div style="display:flex;align-items:center;gap:14px">
         <span style="font-size:11px;color:var(--ink-soft);min-width:270px">↳ ${b.name}</span>
         <span style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink)">${fmtNum(b.del_rev)} Cr</span>
@@ -3230,7 +3641,25 @@ function renderClients(md) {
       <td style="font-size:12px;color:var(--ink-soft)">${c.agency||'—'}</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.video_rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.display_rev)} Cr</td>
-      <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.ctv_rev)} Cr</td>
+      <td style="text-align:right;font-size:12px">${(() => {
+        if (p === 'Mobile') return '<span style="color:var(--ink-faint)">0%</span>';
+        if (p === 'Mobile+CTV') return '<span style="color:var(--ink-faint)">—</span>';
+        // Filter-aware CTV numerator: same dimension logic as clientRevForFilters but for CTV slice
+        let ctvNum = 0;
+        if (f !== 'all') {
+          const fk = formatFieldKey(f);
+          const base = fk ? fk.replace('_rev','') : null;
+          ctvNum = base ? (c[`ctv_${base}_rev`] ?? 0) : 0;
+        } else if (a === 'Video')   { ctvNum = c.ctv_video_rev   ?? 0; }
+          else if (a === 'Display') { ctvNum = c.ctv_display_rev ?? 0; }
+          else                      { ctvNum = c.ctv_rev         ?? 0; }
+        const denom = c._filteredRev;
+        if (!denom) return '<span style="color:var(--ink-faint)">—</span>';
+        const pct = Math.round((ctvNum / denom) * 100);
+        if (pct === 0)   return '<span style="color:var(--ink-faint)">0%</span>';
+        if (pct === 100) return '<span style="color:var(--green);font-weight:600">100%</span>';
+        return `<span style="color:var(--accent);font-weight:500">${pct}%</span>`;
+      })()}</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.mobile_rev)} Cr</td>
       <td style="font-family:var(--mono);color:var(--ink-soft);text-align:right;font-size:12px">${fmtNum(c.mobilectv_rev)} Cr</td>
       <td>${(() => {
@@ -3252,7 +3681,7 @@ function renderClients(md) {
     <td></td>
     <td style="text-align:right;font-family:var(--mono);font-weight:600">${fmtNum(r2(totalRev))} Cr</td>
     <td style="text-align:right;font-family:var(--mono);color:var(--ink-soft)">${totalBooked > 0 ? fmtNum(r2(totalBooked)) + ' Cr' : '—'}</td>
-    <td colspan="7"></td>
+    <td colspan="6"></td>
     <td style="text-align:right;color:var(--ink-soft)">100%</td>
   </tr>`;
 
@@ -3279,7 +3708,7 @@ function renderClients(md) {
           <th>Agency</th>
           <th style="text-align:right;min-width:68px">Video</th>
           <th style="text-align:right;min-width:68px">Display</th>
-          <th style="text-align:right;min-width:68px">CTV</th>
+          <th style="text-align:right;min-width:60px">CTV%</th>
           <th style="text-align:right;min-width:68px">Mobile</th>
           <th style="text-align:right;min-width:68px">Mob+CTV</th>
           <th style="min-width:60px">Health</th>
